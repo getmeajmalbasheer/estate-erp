@@ -458,7 +458,7 @@ else:
 
     # --- 4. LABOR, WAGES & ADVANCE ---
     elif menu == "👷 തൊഴിൽ, കൂലി & അഡ്വാൻസ്":
-        st.subheader("👷 തൊഴിലാളി കൂലിയും അഡ്വാൻസും രേഖപ്പെടുത്താൻ")
+        st.subheader("👷 തൊഴിലാളി കൂലിയും അഡ്വാൻസും രേഖപ്പെടുത്താൻ (Wages & Advance Log)")
         worker_list = [w['തൊഴിലാളി'] for w in st.session_state[f'worker_data_{curr_user}']] if st.session_state[f'worker_data_{curr_user}'] else []
         work_list = [w['പണി'] for w in st.session_state[f'work_data_{curr_user}']]
 
@@ -470,8 +470,13 @@ else:
             worker = col2.selectbox("തൊഴിലാളി", worker_list if worker_list else ["തൊഴിലാളികൾ ഇല്ല"])
             work = "അഡ്വാൻസ് പണം" if entry_type == "അഡ്വാൻസ് (Advance Payment)" else col1.selectbox("പണിയുടെ പേര്", work_list)
             amount = col2.number_input("ആകെ തുക (₹)", min_value=0.0, step=50.0)
-            payment_mode = col1.selectbox("പേയ്മെന്റ് രീതി", ["Cash", "GPay", "Bank Transfer", "Other"])
-            note = col2.text_input("കുറിപ്പുകൾ (ഓപ്ഷണൽ)")
+            
+            # --- PENDING STATUS INCLUSION ---
+            col_p1, col_p2 = st.columns(2)
+            payment_status = col_p1.selectbox("പേയ്മെന്റ് സ്റ്റാറ്റസ് (Status)", ["Paid (നൽകി)", "Pending (നൽകാനുണ്ട്)"])
+            payment_mode = col_p2.selectbox("പേയ്മെന്റ് രീതി", ["Cash", "GPay", "Bank Transfer", "Pending / None"])
+            
+            note = st.text_input("കുറിപ്പുകൾ (ഓപ്ഷണൽ)")
             
             if st.form_submit_button("സേവ് ചെയ്യുക", use_container_width=True):
                 if not worker_list:
@@ -480,17 +485,37 @@ else:
                     st.warning("തുക ശരിയായി നൽകുക.")
                 else:
                     st.session_state[f'labor_data_{curr_user}'].append({
-                        "തീയതി": str(date), "പ്ലോട്ട്": plot, "ഇനം": entry_type, 
-                        "പണി/വിവരണം": work, "തൊഴിലാളി": worker, "തുക/കൂലി": amount, 
-                        "പേയ്മെന്റ് രീതി": payment_mode, "കുറിപ്പ്": note
+                        "തീയതി": str(date), 
+                        "പ്ലോട്ട്": plot, 
+                        "ഇനം": entry_type, 
+                        "പണി/വിവരണം": work, 
+                        "തൊഴിലാളി": worker, 
+                        "തുക/കൂലി": amount, 
+                        "സ്റ്റാറ്റസ്": payment_status,
+                        "പേയ്മെന്റ് രീതി": payment_mode, 
+                        "കുറിപ്പ്": note
                     })
                     save_data(st.session_state[f'labor_data_{curr_user}'], LABOR_FILE)
                     st.success("വിവരങ്ങൾ സുരക്ഷിതമായി സേവ് ചെയ്തു!")
+                    st.rerun()
                 
         if st.session_state[f'labor_data_{curr_user}']:
             st.write("---")
+            st.subheader("📋 കഴിഞ്ഞ കൂലി വിവരങ്ങൾ & Pending കണക്കുകൾ")
             df_labor = pd.DataFrame(st.session_state[f'labor_data_{curr_user}'])
+            
+            # Pending Summary Alert Box
+            if "സ്റ്റാറ്റസ്" in df_labor.columns:
+                pending_df = df_labor[df_labor["സ്റ്റാറ്റസ്"] == "Pending (നൽകാനുണ്ട്)"]
+                total_pending = pending_df["തുക/കൂലി"].sum() if not pending_df.empty else 0.0
+                if total_pending > 0:
+                    st.warning(f"⚠️ **ഇതുവരെ തൊഴിലാളികൾക്ക് നൽകാൻ ബാക്കിയുള്ള തുക (Total Pending): ₹ {total_pending:,.2f}**")
+                else:
+                    st.success("✅ നൽകാൻ പെൻഡിംഗ് തുകകളൊന്നും നിലവിലില്ല (All Wages Paid)!")
+
+            # Dynamic Data Editor (Allows changing Status from Pending -> Paid directly in table)
             edited_labor = st.data_editor(df_labor, num_rows="dynamic", key="labor_editor", use_container_width=True)
+            
             col_d1, col_d2 = st.columns(2)
             with col_d1:
                 if st.button("വിവരങ്ങൾ അപ്ഡേറ്റ് ചെയ്യുക", use_container_width=True):
@@ -500,9 +525,14 @@ else:
                     st.rerun()
             with col_d2:
                 excel_data = convert_df_to_excel(df_labor)
-                st.download_button(label="📥 എക്സൽ ആയി ഡൗൺലോഡ്", data=excel_data, file_name="labor_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-
-    # --- 5. FERTILIZER & DOSAGE ---
+                st.download_button(
+                    label="📥 എക്സൽ ആയി ഡൗൺലോഡ് ചെയ്യുക", 
+                    data=excel_data, 
+                    file_name="labor_report.xlsx", 
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                    use_container_width=True
+                    
+                )    # --- 5. FERTILIZER & DOSAGE ---
     elif menu == "🧪 വളം/മരുന്ന് & ഡോസേജ്":
         st.subheader("വളം/മരുന്ന് വിവരങ്ങളും ഡോസേജും രേഖപ്പെടുത്താൻ")
         with st.form("input_form", clear_on_submit=True):
