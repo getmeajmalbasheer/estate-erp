@@ -253,22 +253,23 @@ else:
         
         if h_data:
             df_h = pd.DataFrame(h_data)
-            if "വിള" in df_h.columns and "പച്ച തൂക്കം (kg)" in df_h.columns and "ഉണക്ക തൂക്കം (kg)" in df_h.columns:
+            if not df_h.empty and "വിള" in df_h.columns and "പച്ച തൂക്കം (kg)" in df_h.columns and "ഉണക്ക തൂക്കം (kg)" in df_h.columns:
                 cardamom_df = df_h[(df_h["വിള"] == "ഏലം") & (df_h["പച്ച തൂക്കം (kg)"] > 0)]
                 
-                # 1-Acre Homestead
-                df_1ac = cardamom_df[cardamom_df["പ്ലോട്ട്"] == "തറവാട് പറമ്പ് (1 ഏക്കർ)"]
-                total_green_1ac = df_1ac["പച്ച തൂക്കം (kg)"].sum()
-                total_dry_1ac = df_1ac["ഉണക്ക തൂക്കം (kg)"].sum()
-                if total_green_1ac > 0:
-                    outturn_1ac = round((total_dry_1ac / total_green_1ac) * 100, 2)
-                    
-                # 2-Acre Pushpakandam
-                df_2ac = cardamom_df[cardamom_df["പ്ലോട്ട്"] == "പുഷ്പക്കണ്ടം (2 ഏക്കർ)"]
-                total_green_2ac = df_2ac["പച്ച തൂക്കം (kg)"].sum()
-                total_dry_2ac = df_2ac["ഉണക്ക തൂക്കം (kg)"].sum()
-                if total_green_2ac > 0:
-                    outturn_2ac = round((total_dry_2ac / total_green_2ac) * 100, 2)
+                if not cardamom_df.empty:
+                    # 1-Acre Homestead
+                    df_1ac = cardamom_df[cardamom_df["പ്ലോട്ട്"] == "തറവാട് പറമ്പ് (1 ഏക്കർ)"]
+                    total_green_1ac = df_1ac["പച്ച തൂക്കം (kg)"].sum()
+                    total_dry_1ac = df_1ac["ഉണക്ക തൂക്കം (kg)"].sum()
+                    if total_green_1ac > 0:
+                        outturn_1ac = round((total_dry_1ac / total_green_1ac) * 100, 2)
+                        
+                    # 2-Acre Pushpakandam
+                    df_2ac = cardamom_df[cardamom_df["പ്ലോട്ട്"] == "പുഷ്പക്കണ്ടം (2 ഏക്കർ)"]
+                    total_green_2ac = df_2ac["പച്ച തൂക്കം (kg)"].sum()
+                    total_dry_2ac = df_2ac["ഉണക്ക തൂക്കം (kg)"].sum()
+                    if total_green_2ac > 0:
+                        outturn_2ac = round((total_dry_2ac / total_green_2ac) * 100, 2)
 
         st.markdown("##### 💵 സാമ്പത്തിക അവസ്ഥ (Financial Metrics)")
         c1, c2, c3, c4 = st.columns(4)
@@ -313,12 +314,29 @@ else:
         st.info("നിങ്ങളുടെ എല്ലാ കണക്കുകളും ഒറ്റക്കോളത്തിൽ എക്സൽ ഫയലായി ഡൗൺലോഡ് ചെയ്ത് സൂക്ഷിക്കാം.")
         
         output_master = io.BytesIO()
+        has_data = False
+        
         with pd.ExcelWriter(output_master, engine='openpyxl') as writer:
-            if l_data: pd.DataFrame(l_data).to_excel(writer, index=False, sheet_name='Labor_Advance')
-            if i_data: pd.DataFrame(i_data).to_excel(writer, index=False, sheet_name='Inputs')
-            if t_data: pd.DataFrame(t_data).to_excel(writer, index=False, sheet_name='Travel')
-            if s_data: pd.DataFrame(s_data).to_excel(writer, index=False, sheet_name='Sales')
-            if h_data: pd.DataFrame(h_data).to_excel(writer, index=False, sheet_name='Harvest_Outturn')
+            if l_data: 
+                pd.DataFrame(l_data).to_excel(writer, index=False, sheet_name='Labor_Advance')
+                has_data = True
+            if i_data: 
+                pd.DataFrame(i_data).to_excel(writer, index=False, sheet_name='Inputs')
+                has_data = True
+            if t_data: 
+                pd.DataFrame(t_data).to_excel(writer, index=False, sheet_name='Travel')
+                has_data = True
+            if s_data: 
+                pd.DataFrame(s_data).to_excel(writer, index=False, sheet_name='Sales')
+                has_data = True
+            if h_data: 
+                pd.DataFrame(h_data).to_excel(writer, index=False, sheet_name='Harvest_Outturn')
+                has_data = True
+            
+            # ഡാറ്റ ഒന്നുമില്ലെങ്കിൽ IndexError വരാതിരിക്കാൻ ശൂന്യമായ ഒരു റിപ്പോർട്ട് ഷീറ്റ് ഉണ്ടാക്കും
+            if not has_data:
+                pd.DataFrame([{"സന്ദേശം": "ഡാറ്റയൊന്നും ലഭ്യമല്ല"}]).to_excel(writer, index=False, sheet_name='Summary')
+
         master_excel_data = output_master.getvalue()
         
         st.download_button(
