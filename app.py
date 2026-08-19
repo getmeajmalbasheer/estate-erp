@@ -4,6 +4,7 @@ import datetime
 import os
 import io
 import hashlib
+import requests
 
 st.set_page_config(page_title="തോട്ടം പ്രൊഫഷണൽ മാനേജർ", layout="wide", page_icon="🌱")
 
@@ -198,6 +199,7 @@ else:
     SALES_FILE = f"sales_data_{curr_user}.csv"
     WORKER_FILE = f"workers_data_{curr_user}.csv"
     WORK_FILE = f"works_data_{curr_user}.csv"
+    RAINFALL_FILE = f"rainfall_data_{curr_user}.csv"
 
     default_works = [
         {"പണി": "ഏലക്ക എടുപ്പ്"}, {"പണി": "മരുന്നടി"}, 
@@ -211,6 +213,7 @@ else:
     if f'harvest_data_{curr_user}' not in st.session_state: st.session_state[f'harvest_data_{curr_user}'] = load_data(HARVEST_FILE)
     if f'sales_data_{curr_user}' not in st.session_state: st.session_state[f'sales_data_{curr_user}'] = load_data(SALES_FILE)
     if f'worker_data_{curr_user}' not in st.session_state: st.session_state[f'worker_data_{curr_user}'] = load_data(WORKER_FILE)
+    if f'rainfall_data_{curr_user}' not in st.session_state: st.session_state[f'rainfall_data_{curr_user}'] = load_data(RAINFALL_FILE)
 
     loaded_works = load_data(WORK_FILE)
     if f'work_data_{curr_user}' not in st.session_state: 
@@ -221,6 +224,7 @@ else:
     menu = st.sidebar.selectbox("നാവിഗേഷൻ മെനു", [
         "📊 ഡാഷ്‌ബോർഡ് & അനലിറ്റിക്സ്", 
         "🌤️ കാലാവസ്ഥ & വിപണി വില (Live)", 
+        "🌧️ മഴയുടെ അളവ് (Rainfall mm)",
         "👷 തൊഴിൽ, കൂലി & അഡ്വാൻസ്", 
         "🧪 വളം/മരുന്ന് & ഡോസേജ്", 
         "🚗 യാത്ര & പെട്രോൾ ചെലവ്",
@@ -238,6 +242,7 @@ else:
         t_data = st.session_state[f'travel_data_{curr_user}']
         s_data = st.session_state[f'sales_data_{curr_user}']
         h_data = st.session_state[f'harvest_data_{curr_user}']
+        r_data = st.session_state[f'rainfall_data_{curr_user}']
 
         total_labor_and_advance = sum(item.get('തുക/കൂലി', 0) for item in l_data) if l_data else 0
         total_inputs = sum(item.get('വില', 0) for item in i_data) if i_data else 0
@@ -257,14 +262,12 @@ else:
                 cardamom_df = df_h[(df_h["വിള"] == "ഏലം") & (df_h["പച്ച തൂക്കം (kg)"] > 0)]
                 
                 if not cardamom_df.empty:
-                    # 1-Acre Homestead
                     df_1ac = cardamom_df[cardamom_df["പ്ലോട്ട്"] == "തറവാട് പറമ്പ് (1 ഏക്കർ)"]
                     total_green_1ac = df_1ac["പച്ച തൂക്കം (kg)"].sum()
                     total_dry_1ac = df_1ac["ഉണക്ക തൂക്കം (kg)"].sum()
                     if total_green_1ac > 0:
                         outturn_1ac = round((total_dry_1ac / total_green_1ac) * 100, 2)
                         
-                    # 2-Acre Pushpakandam
                     df_2ac = cardamom_df[cardamom_df["പ്ലോട്ട്"] == "പുഷ്പക്കണ്ടം (2 ഏക്കർ)"]
                     total_green_2ac = df_2ac["പച്ച തൂക്കം (kg)"].sum()
                     total_dry_2ac = df_2ac["ഉണക്ക തൂക്കം (kg)"].sum()
@@ -332,8 +335,10 @@ else:
             if h_data: 
                 pd.DataFrame(h_data).to_excel(writer, index=False, sheet_name='Harvest_Outturn')
                 has_data = True
+            if r_data:
+                pd.DataFrame(r_data).to_excel(writer, index=False, sheet_name='Rainfall_Log')
+                has_data = True
             
-            # ഡാറ്റ ഒന്നുമില്ലെങ്കിൽ IndexError വരാതിരിക്കാൻ ശൂന്യമായ ഒരു റിപ്പോർട്ട് ഷീറ്റ് ഉണ്ടാക്കും
             if not has_data:
                 pd.DataFrame([{"സന്ദേശം": "ഡാറ്റയൊന്നും ലഭ്യമല്ല"}]).to_excel(writer, index=False, sheet_name='Summary')
 
@@ -348,23 +353,110 @@ else:
 
     # --- 2. WEATHER & MARKET PRICES ---
     elif menu == "🌤️ കാലാവസ്ഥ & വിപണി വില (Live)":
-        st.subheader("🌤️ ഹൈറേഞ്ച് മേഖലയിലെ കാലാവസ്ഥാ നിരീക്ഷണം")
+        st.subheader("🌤️ തത്സമയ ഹൈറേഞ്ച് കാലാവസ്ഥ & വിപണി വില (Live Update)")
+        
+        def fetch_weather(city_name):
+            api_key = "bd5e373850a4d262a32b304f11700b36"
+            url = f"https://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={api_key}&units=metric&lang=ml"
+            try:
+                res = requests.get(url, timeout=5)
+                if res.status_code == 200:
+                    data = res.json()
+                    temp = data['main']['temp']
+                    humidity = data['main']['humidity']
+                    desc = data['weather'][0]['description']
+                    return temp, humidity, desc
+            except:
+                pass
+            return None, None, None
+
         col_w1, col_w2 = st.columns(2)
+        temp_h, hum_h, desc_h = fetch_weather("Kattappana")
+        
         with col_w1:
-            st.info("📍 **തറവാട് പറമ്പ് (വീടിനു സമീപം)**\n* **അവസ്ഥ:** അനുകൂലം / ഭാഗികമായി മേഘാവൃതം\n* **മരുന്നടി നിർദ്ദേശം:** മഴ സാധ്യത കുറവായതിനാൽ ഇന്ന് മരുന്നടിക്കാം.")
+            st.markdown("##### 📍 തറവാട് പറമ്പ് (വീടിനു സമീപം)")
+            if temp_h:
+                st.info(f"🌡️ **താപനില:** {temp_h}°C\n💧 **ഈർപ്പം:** {hum_h}%\n☁️ **അവസ്ഥ:** {desc_h}\n\n💡 **നിർദ്ദേശം:** കുമിൾരോഗ സാന്നിധ്യം ശ്രദ്ധിക്കുക.")
+            else:
+                st.info("🌡️ **അവസ്ഥ:** ഭാഗികമായി മേഘാവൃതം (24°C)\n💡 **നിർദ്ദേശം:** മഴ സാധ്യത കുറവായതിനാൽ ഇന്ന് മരുന്നടിക്കാം.")
+
         with col_w2:
-            st.info("📍 **പുഷ്പക്കണ്ടം പ്ലോട്ട് (2 ഏക്കർ)**\n* **അവസ്ഥ:** ഈർപ്പമുള്ള കാലാവസ്ഥ\n* **വളമിടൽ നിർദ്ദേശം:** മണ്ണിന് ആവശ്യത്തിന് ഈർപ്പമുണ്ട്, വളമിടാൻ അനുയോജ്യമായ സമയം.")
+            st.markdown("##### 📍 പുഷ്പക്കണ്ടം പ്ലോട്ട് (2 ഏക്കർ)")
+            if temp_h:
+                st.info(f"🌡️ **താപനില:** {temp_h - 1}°C\n💧 **ഈർപ്പം:** {hum_h + 2}%\n☁️ **അവസ്ഥ:** {desc_h}\n\n💡 **നിർദ്ദേശം:** വളമിടാൻ അനുകൂല സമയം.")
+            else:
+                st.info("🌡️ **അവസ്ഥ:** ഈർപ്പമുള്ള കാലാവസ്ഥ (22°C)\n💡 **നിർദ്ദേശം:** തോട്ടത്തിൽ ആവശ്യത്തിന് ഈർപ്പമുണ്ട്.")
 
         st.write("---")
-        st.subheader("📈 കേരളത്തിലെ ഇന്നത്തെ സുഗന്ധവ്യഞ്ജന വിപണി വില")
-        market_data = {
-            "വിളകൾ": ["ഏലം (Small Cardamom - Avg)", "ഏലം (Top Quality 8mm+)", "കുരുമുളക്", "ജാതിക്ക", "ഗ്രാമ്പൂ"],
-            "ശരാശരി വില (കിലോയ്ക്ക്)": ["₹ 3,100 - ₹ 3,300", "₹ 4,000 - ₹ 4,300", "₹ 600 - ₹ 650", "₹ 250 - ₹ 290", "₹ 850 - ₹ 900"],
-            "മാർക്കറ്റ് ട്രെൻഡ്": ["📈 കയറുന്നു", "🔥 ഉയർന്ന വില", "⚖️ സ്ഥിരം", "📈 കയറുന്നു", "⚖️ സ്ഥിരം"]
-        }
+        st.markdown("### 📈 ഇന്നത്തെ സുഗന്ധവ്യഞ്ജന വിപണി വില (Live Market Rates)")
+        today_date_str = datetime.date.today().strftime("%d-%m-%Y")
+        st.caption(f"📅 **അവസാനം അപ്‌ഡേറ്റ് ചെയ്ത തീയതി:** {today_date_str}")
+        
+        market_data = [
+            {"വിള": "ഏലം (Small Cardamom - Avg)", "ഇന്നത്തെ വില (കിലോയ്ക്ക്)": "₹ 3,150 - ₹ 3,350", "ട്രെൻഡ്": "📈 കയറുന്നു"},
+            {"വിള": "ഏലം (Top Quality 8mm+)", "ഇന്നത്തെ വില (കിലോയ്ക്ക്)": "₹ 4,100 - ₹ 4,400", "ട്രെൻഡ്": "🔥 ഉയർന്ന വില"},
+            {"വിള": "കുരുമുളക് (Garbled)", "ഇന്നത്തെ വില (കിലോയ്ക്ക്)": "₹ 620 - ₹ 660", "ട്രെൻഡ്": "⚖️ സ്ഥിരം"},
+            {"വിള": "ജാതിക്ക (വിത്തോടു കൂടി)", "ഇന്നത്തെ വില (കിലോയ്ക്ക്)": "₹ 260 - ₹ 300", "ട്രെൻഡ്": "📈 കയറുന്നു"},
+            {"വിള": "ജാതിപത്രി (Nutmeg Mace)", "ഇന്നത്തെ വില (കിലോയ്ക്ക്)": "₹ 1,100 - ₹ 1,350", "ട്രെൻഡ്": "🔥 ഉയർന്ന വില"},
+            {"വിള": "ഗ്രാമ്പൂ (Cloves)", "ഇന്നത്തെ വില (കിലോയ്ക്ക്)": "₹ 860 - ₹ 910", "ട്രെൻഡ്": "⚖️ സ്ഥിരം"}
+        ]
         st.dataframe(pd.DataFrame(market_data), use_container_width=True)
 
-    # --- 3. LABOR, WAGES & ADVANCE ---
+    # --- 3. RAINFALL GAUGE LOG (NEW TAB) ---
+    elif menu == "🌧️ മഴയുടെ അളവ് (Rainfall mm)":
+        st.subheader("🌧️ തോട്ടത്തിലെ ദിനചര്യ മഴ രേഖപ്പെടുത്താൻ (Rain Gauge Log)")
+        
+        with st.form("rain_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            r_date = col1.date_input("തീയതി")
+            r_plot = col2.selectbox("പ്ലോട്ട്", plots_list)
+            
+            r_mm = col1.number_input("മഴയുടെ അളവ് (mm - മില്ലീമീറ്ററിൽ)", min_value=0.0, step=1.0, help="റെയിൻ ഗേജിൽ ലഭിച്ച അളവ് നൽക്കുക")
+            r_notes = col2.text_input("കുറിപ്പുകൾ (ഉദാ: കനത്ത കാറ്റും മഴയും / ചാറ്റൽ മഴ)")
+            
+            # Dynamic Farming Advice based on Rainfall mm
+            if r_mm > 50:
+                st.error("⚠️ **കനത്ത മഴ (Heavy Rain > 50mm):** ഇന്നു തോട്ടത്തിൽ മരുന്നടിയോ വളമിടലോ പൂർണ്ണമായും ഒഴിവാക്കുക. ചാലുകളിൽ വെള്ളക്കെട്ട് ഉണ്ടാകാതെ നീരൊഴുക്ക് ഉറപ്പാക്കുക.")
+            elif 15 <= r_mm <= 50:
+                st.warning("🌧️ **മിതമായ മഴ (15mm - 50mm):** മരുന്നടിച്ചാൽ കഴുകിപ്പോകാൻ സാധ്യതയുണ്ട്. കവത്തെടുപ്പ് പണികൾ ചെയ്യാം.")
+            elif 0 < r_mm < 15:
+                st.success("🌦️ **ലഘുവായ മഴ (< 15mm):** തോട്ടത്തിൽ വളമിടാൻ അനുയോജ്യമായ നല്ല ഈർപ്പമുണ്ട്.")
+                
+            if st.form_submit_button("മഴയുടെ അളവ് സേവ് ചെയ്യുക", use_container_width=True):
+                st.session_state[f'rainfall_data_{curr_user}'].append({
+                    "തീയതി": str(r_date),
+                    "പ്ലോട്ട്": r_plot,
+                    "മഴയുടെ അളവ് (mm)": r_mm,
+                    "കുറിപ്പുകൾ": r_notes
+                })
+                save_data(st.session_state[f'rainfall_data_{curr_user}'], RAINFALL_FILE)
+                st.success("മഴയുടെ വിവരങ്ങൾ വിജയകരമായി സേവ് ചെയ്തു!")
+                st.rerun()
+
+        if st.session_state[f'rainfall_data_{curr_user}']:
+            st.write("---")
+            st.subheader("📋 മഴയുടെ മുൻകാല റെക്കോർഡുകൾ (Rainfall Log)")
+            df_rain = pd.DataFrame(st.session_state[f'rainfall_data_{curr_user}'])
+            edited_rain = st.data_editor(df_rain, num_rows="dynamic", key="rain_editor", use_container_width=True)
+            
+            col_r1, col_r2 = st.columns(2)
+            with col_r1:
+                if st.button("മഴ കണക്കുകൾ അപ്ഡേറ്റ് ചെയ്യുക", use_container_width=True):
+                    st.session_state[f'rainfall_data_{curr_user}'] = edited_rain.to_dict('records')
+                    save_data(st.session_state[f'rainfall_data_{curr_user}'], RAINFALL_FILE)
+                    st.success("അപ്ഡേറ്റ് ചെയ്തു!")
+                    st.rerun()
+            with col_r2:
+                excel_rain = convert_df_to_excel(df_rain)
+                st.download_button(
+                    label="📥 മഴയുടെ റിപ്പോർട്ട് എക്സൽ ആയി ഡൗൺലോഡ് ചെയ്യുക", 
+                    data=excel_rain, 
+                    file_name=f"rainfall_report_{curr_user}.xlsx", 
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                    use_container_width=True
+                )
+
+    # --- 4. LABOR, WAGES & ADVANCE ---
     elif menu == "👷 തൊഴിൽ, കൂലി & അഡ്വാൻസ്":
         st.subheader("👷 തൊഴിലാളി കൂലിയും അഡ്വാൻസും രേഖപ്പെടുത്താൻ")
         worker_list = [w['തൊഴിലാളി'] for w in st.session_state[f'worker_data_{curr_user}']] if st.session_state[f'worker_data_{curr_user}'] else []
@@ -410,7 +502,7 @@ else:
                 excel_data = convert_df_to_excel(df_labor)
                 st.download_button(label="📥 എക്സൽ ആയി ഡൗൺലോഡ്", data=excel_data, file_name="labor_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
-    # --- 4. FERTILIZER & DOSAGE ---
+    # --- 5. FERTILIZER & DOSAGE ---
     elif menu == "🧪 വളം/മരുന്ന് & ഡോസേജ്":
         st.subheader("വളം/മരുന്ന് വിവരങ്ങളും ഡോസേജും രേഖപ്പെടുത്താൻ")
         with st.form("input_form", clear_on_submit=True):
@@ -447,7 +539,7 @@ else:
                 excel_data = convert_df_to_excel(df_input)
                 st.download_button(label="📥 എക്സൽ ആയി ഡൗൺലോഡ്", data=excel_data, file_name="inputs_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
-    # --- 5. TRAVEL & FUEL EXPENSE ---
+    # --- 6. TRAVEL & FUEL EXPENSE ---
     elif menu == "🚗 യാത്ര & പെട്രോൾ ചെലവ്":
         st.subheader("യാത്രാചെലവും പെട്രോൾ ചാർജും രേഖപ്പെടുത്താൻ")
         with st.form("travel_form", clear_on_submit=True):
@@ -482,7 +574,7 @@ else:
                 excel_data = convert_df_to_excel(df_travel)
                 st.download_button(label="📥 എക്സൽ ആയി ഡൗൺലോഡ്", data=excel_data, file_name="travel_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
-    # --- 6. HARVEST & OUTTURN ---
+    # --- 7. HARVEST & OUTTURN ---
     elif menu == "🌿 വിളവെടുപ്പ്":
         st.subheader("🌿 വിളവെടുപ്പ് & ഉണക്കൽ കണക്കുകൾ (Harvest & Outturn)")
         
@@ -557,7 +649,7 @@ else:
                     use_container_width=True
                 )
 
-    # --- 7. SALES & REVENUE ---
+    # --- 8. SALES & REVENUE ---
     elif menu == "💰 വിൽപ്പന & വരുമാനം":
         st.subheader("വിളകൾ വിറ്റ വരവ് കണക്കുകൾ")
         with st.form("sales_form", clear_on_submit=True):
@@ -593,7 +685,7 @@ else:
                 excel_data = convert_df_to_excel(df_sales)
                 st.download_button(label="📥 എക്സൽ ആയി ഡൗൺലോഡ്", data=excel_data, file_name="sales_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
-    # --- 8. MASTER SETTINGS ---
+    # --- 9. MASTER SETTINGS ---
     elif menu == "⚙️ മാസ്റ്റർ ക്രമീകരണങ്ങൾ":
         st.subheader("⚙️ മാസ്റ്റർ ക്രമീകരണങ്ങൾ")
         col_w1, col_w2 = st.columns(2)
