@@ -147,7 +147,6 @@ def convert_df_to_excel(df):
     return output.getvalue()
 
 
-# Default admin creation with role
 default_users = [
     {"username": "admin", "password": hash_password("12345"), "role": "admin"}
 ]
@@ -229,11 +228,11 @@ if not st.session_state.logged_in:
                             if new_user.strip() in existing_usernames:
                                 st.warning("ഈ യൂസർ നെയിം നിലവിലുണ്ട്.")
                             else:
-                                hashed_pass = hash_password(new_pass.strip())
+                                hashed_pass = hash_password(new_user.strip())
                                 st.session_state.users_data.append({
                                     "username": new_user.strip(),
                                     "password": hashed_pass,
-                                    "role": "worker",  # Default assigned role
+                                    "role": "worker",
                                 })
                                 save_data(
                                     st.session_state.users_data, USERS_FILE
@@ -309,7 +308,6 @@ else:
         "രണ്ട് പ്ലോട്ടുകൾക്കും പൊതുവായി",
     ]
 
-    # --- ROLE-BASED NAVIGATION MENU ---
     ADMIN_MENU = [
         "📊 ഡാഷ്‌ബോർഡ് & അനലിറ്റിക്സ്",
         "🌤️ കാലാവസ്ഥ & വിപണി വില (Live)",
@@ -1267,7 +1265,6 @@ else:
         df_users = pd.DataFrame(st.session_state.users_data)
 
         if not df_users.empty:
-            # 1. EDIT USER ROLES
             edited_df = st.data_editor(
                 df_users,
                 column_config={
@@ -1280,7 +1277,7 @@ else:
                         required=True,
                         help="Worker-ൽ നിന്ന് Admin-ലേക്ക് ഉയർത്താൻ Select ചെയ്യുക",
                     ),
-                    "password": None,  # Hides password hashes completely
+                    "password": None,
                 },
                 hide_index=True,
                 use_container_width=True,
@@ -1304,7 +1301,6 @@ else:
 
             st.write("---")
 
-            # 2. RESET WORKER PASSWORD DIRECTLY
             st.markdown("### 🔑 യൂസർ പാസ്‌വേഡ് റീസെറ്റ് ചെയ്യുക (Reset Password)")
 
             all_usernames = [u["username"] for u in st.session_state.users_data]
