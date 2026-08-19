@@ -402,7 +402,7 @@ else:
         ]
         st.dataframe(pd.DataFrame(market_data), use_container_width=True)
 
-    # --- 3. RAINFALL GAUGE LOG (NEW TAB) ---
+    # --- 3. RAINFALL GAUGE LOG ---
     elif menu == "🌧️ മഴയുടെ അളവ് (Rainfall mm)":
         st.subheader("🌧️ തോട്ടത്തിലെ ദിനചര്യ മഴ രേഖപ്പെടുത്താൻ (Rain Gauge Log)")
         
@@ -414,7 +414,6 @@ else:
             r_mm = col1.number_input("മഴയുടെ അളവ് (mm - മില്ലീമീറ്ററിൽ)", min_value=0.0, step=1.0, help="റെയിൻ ഗേജിൽ ലഭിച്ച അളവ് നൽക്കുക")
             r_notes = col2.text_input("കുറിപ്പുകൾ (ഉദാ: കനത്ത കാറ്റും മഴയും / ചാറ്റൽ മഴ)")
             
-            # Dynamic Farming Advice based on Rainfall mm
             if r_mm > 50:
                 st.error("⚠️ **കനത്ത മഴ (Heavy Rain > 50mm):** ഇന്നു തോട്ടത്തിൽ മരുന്നടിയോ വളമിടലോ പൂർണ്ണമായും ഒഴിവാക്കുക. ചാലുകളിൽ വെള്ളക്കെട്ട് ഉണ്ടാകാതെ നീരൊഴുക്ക് ഉറപ്പാക്കുക.")
             elif 15 <= r_mm <= 50:
@@ -456,7 +455,7 @@ else:
                     use_container_width=True
                 )
 
-    # --- 4. LABOR, WAGES & ADVANCE ---
+    # --- 4. LABOR, WAGES & ADVANCE (WITH PENDING STATUS) ---
     elif menu == "👷 തൊഴിൽ, കൂലി & അഡ്വാൻസ്":
         st.subheader("👷 തൊഴിലാളി കൂലിയും അഡ്വാൻസും രേഖപ്പെടുത്താൻ (Wages & Advance Log)")
         worker_list = [w['തൊഴിലാളി'] for w in st.session_state[f'worker_data_{curr_user}']] if st.session_state[f'worker_data_{curr_user}'] else []
@@ -471,7 +470,6 @@ else:
             work = "അഡ്വാൻസ് പണം" if entry_type == "അഡ്വാൻസ് (Advance Payment)" else col1.selectbox("പണിയുടെ പേര്", work_list)
             amount = col2.number_input("ആകെ തുക (₹)", min_value=0.0, step=50.0)
             
-            # --- PENDING STATUS INCLUSION ---
             col_p1, col_p2 = st.columns(2)
             payment_status = col_p1.selectbox("പേയ്മെന്റ് സ്റ്റാറ്റസ് (Status)", ["Paid (നൽകി)", "Pending (നൽകാനുണ്ട്)"])
             payment_mode = col_p2.selectbox("പേയ്മെന്റ് രീതി", ["Cash", "GPay", "Bank Transfer", "Pending / None"])
@@ -504,7 +502,6 @@ else:
             st.subheader("📋 കഴിഞ്ഞ കൂലി വിവരങ്ങൾ & Pending കണക്കുകൾ")
             df_labor = pd.DataFrame(st.session_state[f'labor_data_{curr_user}'])
             
-            # Pending Summary Alert Box
             if "സ്റ്റാറ്റസ്" in df_labor.columns:
                 pending_df = df_labor[df_labor["സ്റ്റാറ്റസ്"] == "Pending (നൽകാനുണ്ട്)"]
                 total_pending = pending_df["തുക/കൂലി"].sum() if not pending_df.empty else 0.0
@@ -513,7 +510,6 @@ else:
                 else:
                     st.success("✅ നൽകാൻ പെൻഡിംഗ് തുകകളൊന്നും നിലവിലില്ല (All Wages Paid)!")
 
-            # Dynamic Data Editor (Allows changing Status from Pending -> Paid directly in table)
             edited_labor = st.data_editor(df_labor, num_rows="dynamic", key="labor_editor", use_container_width=True)
             
             col_d1, col_d2 = st.columns(2)
@@ -531,8 +527,9 @@ else:
                     file_name="labor_report.xlsx", 
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
                     use_container_width=True
-                    
-                )    # --- 5. FERTILIZER & DOSAGE ---
+                )
+
+    # --- 5. FERTILIZER & DOSAGE ---
     elif menu == "🧪 വളം/മരുന്ന് & ഡോസേജ്":
         st.subheader("വളം/മരുന്ന് വിവരങ്ങളും ഡോസേജും രേഖപ്പെടുത്താൻ")
         with st.form("input_form", clear_on_submit=True):
