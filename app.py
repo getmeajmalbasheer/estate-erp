@@ -1,423 +1,458 @@
 import streamlit as st
 import pandas as pd
-import datetime
-import io
-import sqlite3
-import bcrypt
+from datetime import datetime
+import gspread
+from google.oauth2.service_account import Credentials
 import requests
+import urllib.parse
+from PIL import Image
 
-st.set_page_config(page_title="തോട്ടം പ്രൊഫഷണൽ മാനേജർ", layout="wide", page_icon="🌱")
+# പേജ് സെറ്റിംഗ്സ്
+st.set_page_config(page_title="തോട്ടം പ്രൊഫഷണൽ മാനേജർ ERP (Audit Edition)", page_icon="🌿", layout="wide")
 
-# --- 1. DATABASE SETUP (SQLite) ---
+# Google Sheets കണക്ഷൻ
+@st.cache_resource
 def get_db_connection():
-    conn = sqlite3.connect('estate_data.db', check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        client = gspread.authorize(creds)
+        sheet = client.open("Thottam_ERP_Database")
+        return sheet
+    except Exception as e:
+        return None
 
-def init_db():
-    conn = get_db_connection()
-    c = conn.cursor()
-    # Users Table
-    c.execute('''CREATE TABLE IF NOT EXISTS users 
-                 (username TEXT PRIMARY KEY, password TEXT, role TEXT)''')
-    # Rainfall Table
-    c.execute('''CREATE TABLE IF NOT EXISTS rainfall 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, date TEXT, plot TEXT, mm REAL, notes TEXT)''')
-    # Labor Table
-    c.execute('''CREATE TABLE IF NOT EXISTS labor 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, date TEXT, plot TEXT, category TEXT, work TEXT, worker TEXT, amount REAL, status TEXT, mode TEXT, note TEXT)''')
-    # Inputs Table
-    c.execute('''CREATE TABLE IF NOT EXISTS inputs 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, date TEXT, plot TEXT, item TEXT, dosage TEXT, qty TEXT, cost REAL)''')
-    # Travel Table
-    c.execute('''CREATE TABLE IF NOT EXISTS travel 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, date TEXT, plot TEXT, purpose TEXT, cost REAL)''')
-    # Harvest Table
-    c.execute('''CREATE TABLE IF NOT EXISTS harvest 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, date TEXT, plot TEXT, crop TEXT, green_wt REAL, dry_wt REAL, outturn REAL, notes TEXT)''')
-    # Sales Table
-    c.execute('''CREATE TABLE IF NOT EXISTS sales 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, date TEXT, crop TEXT, qty REAL, total REAL, buyer TEXT)''')
-    # Workers Master
-    c.execute('''CREATE TABLE IF NOT EXISTS workers_master 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, name TEXT, phone TEXT)''')
-    # Works Master
-    c.execute('''CREATE TABLE IF NOT EXISTS works_master 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, name TEXT)''')
+db = get_db_connection()
+
+# ആക്ടിവിറ്റി ലോഗ് ചെയ്യാനുള്ള ഫങ്ഷൻ (Audit Trail)
+def log_activity(username, action_type, details):
+    try:
+        if db:
+            ws = db.worksheet("activity_logs")
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ws.append_row([username, action_type, details, timestamp])
+    except:
+        pass
+
+# തത്സമയ കാലാവസ്ഥാ ഫങ്ഷൻ
+def get_weather():
+    try:
+        url = "https://api.open-meteo.com/v1/forecast?latitude=10.0889&longitude=77.0595&current=temperature_2m,relative_humidity_2m,precipitation"
+        response = requests.get(url, timeout=3).json()
+        temp = response['current']['temperature_2m']
+        humidity = response['current']['relative_humidity_2m']
+        rain = response['current']['precipitation']
+        return temp, humidity, rain
+    except:
+        return 24.5, 82.0, 0.0
+
+# വിപണി വില സിമുലേഷൻ
+def get_market_prices():
+    return {
+        "ഏലം (Cardamom - 7mm/8mm)": "₹ 1,650 / kg",
+        "കുരുമുളക് (Black Pepper)": "₹ 620 / kg",
+        "ജാതിക്ക (Nutmeg)": "₹ 240 / kg",
+        "ജാതിപത്രി (Mace)": "₹ 1,150 / kg"
+    }
+
+# സെഷൻ സ്റ്റേറ്റുകൾ പരിശോധിക്കുക
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+    st.session_state["username"] = ""
+    st.session_state["role"] = ""
+
+if not st.session_state["logged_in"]:
+    st.title("🌿 തോട്ടം പ്രൊഫഷണൽ മാനേജർ ERP (Audit Edition)")
+    st.subheader("🔐 സിസ്റ്റത്തിലേക്ക് ലോഗിൻ ചെയ്യുക")
     
-    # Default Admin User Setup
-    c.execute("SELECT * FROM users WHERE username = 'admin'")
-    if not c.fetchone():
-        admin_pass = bcrypt.hashpw("12345".encode(), bcrypt.gensalt()).decode()
-        c.execute("INSERT INTO users VALUES ('admin', ?, 'admin')", (admin_pass,))
+    login_type = st.radio("ലോഗിൻ വിഭാഗം തിരഞ്ഞെടുക്കുക", ["മാനേജ്‌മെന്റ് / അഡ്മിൻ (Admin/Supervisor)", "തൊഴിലാളി പാസ്ബുക്ക് (Worker Portal)"])
     
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# --- SECURE HASH FUNCTIONS ---
-def make_hash(password):
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-
-def check_password(password, hashed_password):
-    return bcrypt.checkpw(password.encode(), hashed_password.encode())
-
-# --- UI STYLING ---
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #F4F6F4; color: #2B2D42; }
-    .block-container { padding-top: 2rem; padding-bottom: 3rem; }
-    [data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #D4A373; }
-    .saas-card { background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 6px solid #1E4620; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.04); }
-    .card-title { font-size: 0.85rem; font-weight: 600; color: #718096; margin-bottom: 6px; text-transform: uppercase; }
-    .card-value { font-size: 1.8rem; font-weight: 700; color: #1E4620; }
-    .card-delta-pos { font-size: 0.75rem; font-weight: 600; color: #52B788; }
-    .card-delta-neg { font-size: 0.75rem; font-weight: 600; color: #BC4749; }
-    .stButton>button { border-radius: 8px; background-color: #1E4620; color: white; font-weight: 600; border: none; }
-    .stButton>button:hover { background-color: #D4A373; color: #1E4620; }
-    h1, h2, h3 { font-weight: 700; color: #1E4620 !important; }
-</style>
-""", unsafe_allow_html=True)
-
-# Helper function to convert DataFrames to Excel
-def convert_df_to_excel(df):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Report')
-    return output.getvalue()
-
-# Session State Initialization
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.username = ""
-    st.session_state.role = "user"
-
-# --- LOGIN / REGISTRATION PAGE ---
-if not st.session_state.logged_in:
-    col1, col2, col3 = st.columns([1, 1.2, 1])
-    with col2:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("<h1 style='text-align: center; font-size: 2rem;'>🌱 തോട്ടം മാനേജർ</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #718096; margin-bottom: 30px;'>സുരക്ഷിതമായ എസ്റ്റേറ്റ് ഡിജിറ്റൽ സൊല്യൂഷൻ</p>", unsafe_allow_html=True)
+    if login_type == "മാനേജ്‌മെന്റ് / അഡ്മിൻ (Admin/Supervisor)":
+        with st.form("admin_login"):
+            username = st.text_input("യൂസർ നെയിം")
+            password = st.text_input("പാസ്‌വേഡ്", type="password")
+            submit = st.form_submit_button("ലോഗിൻ ചെയ്യുക")
+            
+            if submit:
+                if username == "admin" and password == "admin123":
+                    st.session_state["logged_in"] = True
+                    st.session_state["username"] = "തോട്ടം ഉടമ (Admin)"
+                    st.session_state["role"] = "Admin"
+                    log_activity("Admin", "LOGIN", "Successfully logged into system")
+                    st.rerun()
+                elif username == "supervisor" and password == "sup123":
+                    st.session_state["logged_in"] = True
+                    st.session_state["username"] = "സൂപ്പർവൈസർ (Supervisor)"
+                    st.session_state["role"] = "Supervisor"
+                    log_activity("Supervisor", "LOGIN", "Successfully logged into system")
+                    st.rerun()
+                else:
+                    st.error("❌ തെറ്റായ യൂസർ നെയിം അല്ലെങ്കിൽ പാസ്‌വേഡ്!")
+        st.info("💡 **ടെസ്റ്റ് ലോഗിൻ:** Admin (`admin` / `admin123`) | Supervisor (`supervisor` / `sup123`)")
         
-        tab1, tab2 = st.tabs(["🔐 ലോഗിൻ", "📝 പുതിയ അക്കൗണ്ട്"])
-        
-        with tab1:
-            with st.form("login_form"):
-                username = st.text_input("യൂസർ നെയിം")
-                password = st.text_input("പാസ്‌വേഡ്", type="password")
-                submit = st.form_submit_button("ലോഗിൻ ചെയ്യുക", use_container_width=True)
-                
-                if submit:
-                    conn = get_db_connection()
-                    user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-                    conn.close()
-                    
-                    if user and check_password(password, user['password']):
-                        st.session_state.logged_in = True
-                        st.session_state.username = username
-                        st.session_state.role = user['role']
-                        st.rerun()
-                    else:
-                        st.error("തെറ്റായ യൂസർ നെയിം അല്ലെങ്കിൽ പാസ്‌വേഡ്!")
-                        
-        with tab2:
-            with st.form("signup_form"):
-                new_user = st.text_input("യൂസർ നെയിം നൽകുക")
-                new_pass = st.text_input("പാസ്‌വേഡ് നൽകുക", type="password")
-                confirm_pass = st.text_input("പാസ്‌വേഡ് വീണ്ടും നൽകുക", type="password")
-                signup_submit = st.form_submit_button("അക്കൗണ്ട് ക്രിയേറ്റ് ചെയ്യുക", use_container_width=True)
-                
-                if signup_submit:
-                    if new_user.strip() and new_pass.strip():
-                        if new_pass == confirm_pass:
-                            conn = get_db_connection()
-                            existing = conn.execute("SELECT * FROM users WHERE username = ?", (new_user.strip(),)).fetchone()
-                            if existing:
-                                st.warning("ഈ യൂസർ നെയിം നിലവിലുണ്ട്.")
-                            else:
-                                hashed_pass = make_hash(new_pass.strip())
-                                conn.execute("INSERT INTO users VALUES (?, ?, 'user')", (new_user.strip(), hashed_pass))
-                                conn.commit()
-                                st.success("അക്കൗണ്ട് വിജയകരമായി ക്രിയേറ്റ് ചെയ്തു! ലോഗിൻ ചെയ്യാം.")
-                            conn.close()
-                        else:
-                            st.error("പാസ്‌വേഡുകൾ ഒരേപോലെ ആയിരിക്കണം!")
-                    else:
-                        st.warning("എല്ലാ കോളങ്ങളും പൂരിപ്പിക്കുക.")
+    else:
+        with st.form("worker_login"):
+            worker_id = st.text_input("തൊഴിലാളിയുടെ പേര് / ID")
+            w_pass = st.text_input("പാസ്‌വേഡ്", type="password")
+            w_sub = st.form_submit_button("പാസ്ബുക്ക് തുറക്കുക")
+            if w_sub and worker_id:
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = worker_id
+                st.session_state["role"] = "Worker"
+                log_activity(worker_id, "WORKER_LOGIN", "Viewed digital passbook")
+                st.rerun()
 
 else:
-    curr_user = st.session_state.username
-    st.sidebar.markdown(f"### 🌿 സ്വാഗതം, **{curr_user.upper()}**")
-    st.sidebar.markdown(f"👤 റോൾ: `{st.session_state.role.upper()}`")
-    st.sidebar.markdown("---")
-    if st.sidebar.button("ലോഗൗട്ട് ചെയ്യുക", use_container_width=True):
-        st.session_state.logged_in = False
-        st.session_state.username = ""
-        st.session_state.role = "user"
+    if db is None:
+        st.error("⚠️ ഗൂഗിൾ ഷീറ്റ് കണക്ഷൻ പരാജയപ്പെട്ടു!")
+        st.stop()
+
+    st.sidebar.success(f"ലോഗിൻ ചെയ്തിരിക്കുന്നു:\n**{st.session_state['username']}**")
+    
+    lang = st.sidebar.selectbox("ভাষা / Language", ["മലയാളം", "English"])
+
+    if st.sidebar.button("ലോഗ് ഔട്ട് (Logout)"):
+        log_activity(st.session_state['username'], "LOGOUT", "Logged out from system")
+        st.session_state["logged_in"] = False
+        st.session_state["username"] = ""
+        st.session_state["role"] = ""
         st.rerun()
+
+    def get_data(worksheet_name):
+        try:
+            ws = db.worksheet(worksheet_name)
+            data = ws.get_all_records()
+            return pd.DataFrame(data)
+        except:
+            return pd.DataFrame()
+
+    if st.session_state["role"] == "Worker":
+        st.subheader(f"📖 ഡിജിറ്റൽ പാസ്ബുക്ക് - {st.session_state['username']}")
+        workers_df = get_data("workers")
+        adv_df = get_data("advances")
         
-    st.title("🌱 തോട്ടം പ്രൊഫഷണൽ മാനേജർ (ERP)")
-    st.markdown("---")
+        if not workers_df.empty and 'name' in workers_df.columns:
+            my_work = workers_df[workers_df['name'].str.lower() == st.session_state['username'].lower()]
+            st.write("### ഹാജർ വിവരങ്ങൾ")
+            st.dataframe(my_work)
+            
+        if not adv_df.empty and 'name' in adv_df.columns:
+            my_adv = adv_df[adv_df['name'].str.lower() == st.session_state['username'].lower()]
+            st.write("### അഡ്വാൻസ് വിവരങ്ങൾ")
+            st.dataframe(my_adv)
+            
+        st.stop()
 
-    plots_list = ["തറവാട് പറമ്പ് (1 ഏക്കർ)", "പുഷ്പക്കണ്ടം (2 ഏക്കർ)", "രണ്ട് പ്ലോട്ടുകൾക്കും പൊതുവായി"]
+    if st.session_state["role"] == "Admin":
+        menu_items = [
+            "ഡാഷ്‌ബോർഡ്", "ഓഡിറ്റ് ട്രെയ്ൽ (Activity Log)", "തൊഴിലാളി & UPI പേയ്‌മെന്റ്", 
+            "ലേഖന വിശകലനം (Productivity)", "മണ്ണുപരിശോധന (Soil Test Log)", "എക്സ്പോർട്ട് & ഷിപ്പിംഗ്", 
+            "🤖 AI തോട്ടം ചാറ്റ്‌ബോട്ട്", "🔮 AI വിളവെടുപ്പ് പ്രവചനം", "💡 AI ചെലവ് ഒപ്റ്റിമൈസർ", 
+            "AI രോഗ നിർണ്ണയം (AI Diagnosis)", "വോയ്സ് എൻട്രി (Voice Command)", 
+            "വിളവെടുപ്പ് & ഗ്രേഡിംഗ്", "സ്റ്റോക്ക് & ഇൻവെന്ററി", "വിൽപ്പനയും ബില്ലിംഗും", 
+            "മെഷിനറി & ഫ്യുവൽ", "ചെലവ് കണക്കുകൾ", "ലാഭ-നഷ്ടക്കണക്ക് (P&L)", "റിപ്പോർട്ടുകൾ"
+        ]
+    else:
+        menu_items = ["ഡാഷ്‌ബോർഡ്", "തൊഴിലാളി & UPI പേയ്‌മെന്റ്", "🤖 AI തോട്ടം ചാറ്റ്‌ബോട്ട്", "AI രോഗ നിർണ്ണയം (AI Diagnosis)", "വിളവെടുപ്പ് & ഗ്രേഡിംഗ്"]
 
-    menu = st.sidebar.selectbox("നാവിഗേഷൻ മെനു", [
-        "📊 ഡാഷ്‌ബോർഡ് & അനലിറ്റിക്സ്", 
-        "🌤️ കാലാവസ്ഥ & വിപണി വില (Live)", 
-        "🌧️ മഴയുടെ അളവ് (Rainfall mm)",
-        "👷 തൊഴിൽ, കൂലി & അഡ്വാൻസ്", 
-        "🧪 വളം/മരുന്ന് & ഡോസേജ്", 
-        "🚗 യാത്ര & പെട്രോൾ ചെലവ്",
-        "🌿 വിളവെടുപ്പ്", 
-        "💰 വിൽപ്പന & വരുമാനം",
-        "⚙️ മാസ്റ്റർ ക്രമീകരണങ്ങൾ"
-    ])
+    menu = st.sidebar.selectbox("Navigation", menu_items)
 
-    conn = get_db_connection()
-
-    # --- 1. DASHBOARD & ANALYTICS ---
-    if menu == "📊 ഡാഷ്‌ബോർഡ് & അനലിറ്റിക്സ്":
-        st.subheader(f"📊 {curr_user.upper()} - വരവു-ചെലവ് സംഗ്രഹവും അനലിറ്റിക്സും")
-        
-        df_l = pd.read_sql_query("SELECT * FROM labor WHERE user=?", conn, params=(curr_user,))
-        df_i = pd.read_sql_query("SELECT * FROM inputs WHERE user=?", conn, params=(curr_user,))
-        df_t = pd.read_sql_query("SELECT * FROM travel WHERE user=?", conn, params=(curr_user,))
-        df_s = pd.read_sql_query("SELECT * FROM sales WHERE user=?", conn, params=(curr_user,))
-        df_h = pd.read_sql_query("SELECT * FROM harvest WHERE user=?", conn, params=(curr_user,))
-        df_r = pd.read_sql_query("SELECT * FROM rainfall WHERE user=?", conn, params=(curr_user,))
-
-        total_labor = df_l['amount'].sum() if not df_l.empty else 0.0
-        total_inputs = df_i['cost'].sum() if not df_i.empty else 0.0
-        total_travel = df_t['cost'].sum() if not df_t.empty else 0.0
-        total_sales = df_s['total'].sum() if not df_s.empty else 0.0
-        
-        total_expense = total_labor + total_inputs + total_travel
-        net_profit = total_sales - total_expense
-
-        st.markdown("##### 💵 സാമ്പത്തിക അവസ്ഥ (Financial Metrics)")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.markdown(f'<div class="saas-card"><p class="card-title">ആകെ ചെലവ്</p><p class="card-value">₹ {total_expense:,.2f}</p></div>', unsafe_allow_html=True)
-        c2.markdown(f'<div class="saas-card"><p class="card-title">ആകെ വരുമാനം</p><p class="card-value">₹ {total_sales:,.2f}</p></div>', unsafe_allow_html=True)
-        
-        profit_class = "card-delta-pos" if net_profit >= 0 else "card-delta-neg"
-        c3.markdown(f'<div class="saas-card"><p class="card-title">അന്തിമ ഫലം</p><p class="card-value">₹ {net_profit:,.2f}</p><p class="{profit_class}">{"ലാഭം" if net_profit >= 0 else "നഷ്ടം"}</p></div>', unsafe_allow_html=True)
-        c4.markdown(f'<div class="saas-card"><p class="card-title">യാത്ര & പെട്രോൾ</p><p class="card-value">₹ {total_travel:,.2f}</p></div>', unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # Charts Section
-        if not df_r.empty:
-            st.markdown("##### 🌧️ മഴയുടെ അളവ് (Rainfall Graph)")
-            st.line_chart(df_r.set_index("date")["mm"])
-
-        st.write("---")
-        st.subheader("📦 മാസ്റ്റർ ഡാറ്റ ബാക്ക്അപ്പ്")
-        output_master = io.BytesIO()
-        with pd.ExcelWriter(output_master, engine='openpyxl') as writer:
-            df_l.to_excel(writer, index=False, sheet_name='Labor')
-            df_i.to_excel(writer, index=False, sheet_name='Inputs')
-            df_s.to_excel(writer, index=False, sheet_name='Sales')
-            df_h.to_excel(writer, index=False, sheet_name='Harvest')
-            df_r.to_excel(writer, index=False, sheet_name='Rainfall')
-
-        st.download_button(
-            label="📥 മുഴുവൻ കണക്കുകളും ബാക്ക്അപ്പ് എടുക്കുക (Excel)",
-            data=output_master.getvalue(),
-            file_name=f"estate_backup_{curr_user}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-    # --- 2. WEATHER & MARKET PRICES ---
-    elif menu == "🌤️ കാലാവസ്ഥ & വിപണി വില (Live)":
-        st.subheader("🌤️ തത്സമയ ഹൈറേഞ്ച് കാലാവസ്ഥ & വിപണി വില")
-        
-        # OpenWeather API from Streamlit Secrets
-        api_key = st.secrets.get("OPENWEATHER_API_KEY", "bd5e373850a4d262a32b304f11700b36")
-        
-        def fetch_weather(city_name):
-            url = f"https://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={api_key}&units=metric&lang=ml"
-            try:
-                res = requests.get(url, timeout=5)
-                if res.status_code == 200:
-                    data = res.json()
-                    return data['main']['temp'], data['main']['humidity'], data['weather'][0]['description']
-            except:
-                pass
-            return None, None, None
-
-        temp_h, hum_h, desc_h = fetch_weather("Kattappana")
+    # 1. ഡാഷ്‌ബോർഡ്
+    if menu == "ഡാഷ്‌ബോർഡ്":
+        st.subheader("📊 സ്മാർട്ട് ഡാഷ്‌ബോർഡും ലൈവ് വിപണി വിലയും")
         
         col_w1, col_w2 = st.columns(2)
         with col_w1:
-            st.markdown("##### 📍 തറവാട് പറമ്പ്")
-            if temp_h:
-                st.info(f"🌡️ **താപനില:** {temp_h}°C\n💧 **ഈർപ്പം:** {hum_h}%\n☁️ **അവസ്ഥ:** {desc_h}")
+            st.markdown("### 🌤️ തോട്ടം കാലാവസ്ഥ")
+            temp, humidity, rain = get_weather()
+            w1, w2, w3 = st.columns(3)
+            w1.metric("🌡️ താപനില", f"{temp} °C")
+            w2.metric("💧 ഈർപ്പം", f"{humidity} %")
+            w3.metric("🌧️ മഴ", f"{rain} mm")
+            if humidity > 85 and rain > 2:
+                st.warning("⚠️ ജാഗ്രത: ഏലത്തിൽ കാപ്സ്യൂൾ റോട്ട് രോഗം വരാൻ സാധ്യതയുള്ള കാലാവസ്ഥ!")
             else:
-                st.info("🌡️ **അവസ്ഥ:** 24°C | ഭാഗികമായി മേഘാവൃതം")
+                st.success("✅ കാലാവസ്ഥ അനുകൂലം.")
 
         with col_w2:
-            st.markdown("##### 📍 പുഷ്പക്കണ്ടം പ്ലോട്ട്")
-            if temp_h:
-                st.info(f"🌡️ **താപനില:** {temp_h - 1}°C\n💧 **ഈർപ്പം:** {hum_h + 2}%\n☁️ **അവസ്ഥ:** {desc_h}")
-            else:
-                st.info("🌡️ **അവസ്ഥ:** 22°C | ഈർപ്പമുള്ള കാലാവസ്ഥ")
+            st.markdown("### 📈 സ്പൈസസ് ബോർഡ് ലൈവ് വിപണി വില")
+            prices = get_market_prices()
+            for crop, price in prices.items():
+                st.info(f"**{crop}**: {price}")
 
-    # --- 3. RAINFALL LOG ---
-    elif menu == "🌧️ മഴയുടെ അളവ് (Rainfall mm)":
-        st.subheader("🌧️ ദിനചര്യ മഴ രേഖപ്പെടുത്താൻ")
+        st.markdown("---")
         
-        with st.form("rain_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            r_date = col1.date_input("തീയതി")
-            r_plot = col2.selectbox("പ്ലോട്ട്", plots_list)
-            r_mm = col1.number_input("മഴയുടെ അളവ് (mm)", min_value=0.0, step=1.0)
-            r_notes = col2.text_input("കുറിപ്പുകൾ")
-            
-            if st.form_submit_button("സേവ് ചെയ്യുക", use_container_width=True):
-                conn.execute("INSERT INTO rainfall (user, date, plot, mm, notes) VALUES (?, ?, ?, ?, ?)",
-                             (curr_user, str(r_date), r_plot, r_mm, r_notes))
-                conn.commit()
-                st.success("മഴയുടെ വിവരങ്ങൾ സേവ് ചെയ്തു!")
-                st.rerun()
-
-        df_rain = pd.read_sql_query("SELECT id, date AS തീയതി, plot AS പ്ലോട്ട്, mm AS 'അളവ് (mm)', notes AS കുറിപ്പ് FROM rainfall WHERE user=?", conn, params=(curr_user,))
-        if not df_rain.empty:
-            st.write("---")
-            st.dataframe(df_rain, use_container_width=True)
-
-    # --- 4. LABOR & WAGES ---
-    elif menu == "👷 തൊഴിൽ, കൂലി & അഡ്വാൻസ്":
-        st.subheader("👷 തൊഴിലാളി കൂലിയും അഡ്വാൻസും")
+        workers_df = get_data("workers")
+        yields_df = get_data("yields")
+        expenses_df = get_data("expenses")
+        sales_df = get_data("sales")
         
-        workers_db = conn.execute("SELECT name FROM workers_master WHERE user=?", (curr_user,)).fetchall()
-        worker_list = [w['name'] for w in workers_db] if workers_db else ["തൊഴിലാളികൾ ഇല്ല"]
+        total_workers = len(workers_df) if not workers_df.empty else 0
+        total_yield = yields_df['quantity'].sum() if not yields_df.empty and 'quantity' in yields_df.columns else 0
+        total_expense = expenses_df['amount'].sum() if not expenses_df.empty and 'amount' in expenses_df.columns else 0
+        total_revenue = sales_df['total_amount'].sum() if not sales_df.empty and 'total_amount' in sales_df.columns else 0
 
-        with st.form("labor_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            date = col1.date_input("തീയതി")
-            plot = col2.selectbox("പ്ലോട്ട്", plots_list)
-            entry_type = col1.selectbox("ഇനം", ["കൂലി (Labor Wages)", "അഡ്വാൻസ് (Advance Payment)"])
-            worker = col2.selectbox("തൊഴിലാളി", worker_list)
-            work = col1.text_input("പണിയുടെ പേര് / വിവരണം")
-            amount = col2.number_input("ആകെ തുക (₹)", min_value=0.0, step=50.0)
-            status = col1.selectbox("സ്റ്റാറ്റസ്", ["Paid (നൽകി)", "Pending (നൽകാനുണ്ട്)"])
-            mode = col2.selectbox("രീതി", ["Cash", "GPay", "Bank Transfer"])
-            note = st.text_input("കുറിപ്പ്")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("തൊഴിലാളികൾ", f"{total_workers} പേർ")
+        col2.metric("വിളവെടുപ്പ്", f"{total_yield} കിലോ")
+        if st.session_state["role"] == "Admin":
+            col3.metric("ആകെ വരുമാനം", f"₹ {total_revenue}")
+            col4.metric("ആകെ ചെലവ്", f"₹ {total_expense}")
 
-            if st.form_submit_button("സേവ് ചെയ്യുക", use_container_width=True):
-                conn.execute("INSERT INTO labor (user, date, plot, category, work, worker, amount, status, mode, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                             (curr_user, str(date), plot, entry_type, work, worker, amount, status, mode, note))
-                conn.commit()
-                st.success("കൂലി വിവരം സേവ് ചെയ്തു!")
-                st.rerun()
-
-    # --- 5. INPUTS (FERTILIZERS & PESTICIDES) ---
-    elif menu == "🧪 വളം/മരുന്ന് & ഡോസേജ്":
-        st.subheader("🧪 വളം, മരുന്ന് വിവരങ്ങൾ")
+    # 2. ഓഡിറ്റ് ട്രെയ്ൽ & ആക്ടിവിറ്റി ലോഗ് (Activity Log)
+    elif menu == "ഓഡിറ്റ് ട്രെയ്ൽ (Activity Log)" and st.session_state["role"] == "Admin":
+        st.subheader("🛡️ സിസ്റ്റം സുരക്ഷ & ആക്ടിവിറ്റി ലോഗ് (Audit Trail)")
+        st.write("ആപ്പിൽ നടന്ന ലോഗിൻ വിവരങ്ങളും മറ്റ് പ്രവർത്തനങ്ങളും ഇവിടെ നിരീക്ഷിക്കാം:")
         
-        with st.form("inputs_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            date = col1.date_input("തീയതി")
-            plot = col2.selectbox("പ്ലോട്ട്", plots_list)
-            item = col1.text_input("വളത്തിന്റെ/മരുന്നിന്റെ പേര്")
-            dosage = col2.text_input("ഡോസേജ്")
-            qty = col1.text_input("അളവ് (Qty)")
-            cost = col2.number_input("ചെലവ് (₹)", min_value=0.0, step=50.0)
-            
-            if st.form_submit_button("സേവ് ചെയ്യുക", use_container_width=True):
-                conn.execute("INSERT INTO inputs (user, date, plot, item, dosage, qty, cost) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                             (curr_user, str(date), plot, item, dosage, qty, cost))
-                conn.commit()
-                st.success("വിവരങ്ങൾ സേവ് ചെയ്തു!")
-                st.rerun()
-
-    # --- 6. TRAVEL & FUEL ---
-    elif menu == "🚗 യാത്ര & പെട്രോൾ ചെലവ്":
-        st.subheader("🚗 യാത്ര, പെട്രോൾ വിവരങ്ങൾ")
-        
-        with st.form("travel_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            date = col1.date_input("തീയതി")
-            plot = col2.selectbox("പ്ലോട്ട്", plots_list)
-            purpose = col1.text_input("യാത്രയുടെ ഉദ്ദേശ്യം / വിവരണം")
-            cost = col2.number_input("ചെലവ് (₹)", min_value=0.0, step=50.0)
-            
-            if st.form_submit_button("സേവ് ചെയ്യുക", use_container_width=True):
-                conn.execute("INSERT INTO travel (user, date, plot, purpose, cost) VALUES (?, ?, ?, ?, ?)",
-                             (curr_user, str(date), plot, purpose, cost))
-                conn.commit()
-                st.success("യാത്രാ വിവരങ്ങൾ സേവ് ചെയ്തു!")
-                st.rerun()
-
-    # --- 7. HARVEST ---
-    elif menu == "🌿 വിളവെടുപ്പ്":
-        st.subheader("🌿 വിളവെടുപ്പ് വിവരങ്ങൾ")
-        
-        with st.form("harvest_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            date = col1.date_input("തീയതി")
-            plot = col2.selectbox("പ്ലോട്ട്", plots_list)
-            crop = col1.text_input("വിള (ഉദാ: ഏലം, കുരുമുളക്)")
-            green_wt = col2.number_input("പച്ച തൂക്കം (kg)", min_value=0.0, step=1.0)
-            dry_wt = col1.number_input("ഉണക്ക തൂക്കം (kg)", min_value=0.0, step=1.0)
-            outturn = col2.number_input("ഔട്ട്‌ടേൺ (Outturn %)", min_value=0.0, step=1.0)
-            notes = st.text_input("കുറിപ്പുകൾ")
-            
-            if st.form_submit_button("സേവ് ചെയ്യുക", use_container_width=True):
-                conn.execute("INSERT INTO harvest (user, date, plot, crop, green_wt, dry_wt, outturn, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                             (curr_user, str(date), plot, crop, green_wt, dry_wt, outturn, notes))
-                conn.commit()
-                st.success("വിളവെടുപ്പ് വിവരങ്ങൾ സേവ് ചെയ്തു!")
-                st.rerun()
-
-    # --- 8. SALES & INCOME ---
-    elif menu == "💰 വിൽപ്പന & വരുമാനം":
-        st.subheader("💰 വിൽപ്പന വിവരങ്ങൾ")
-        
-        with st.form("sales_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            date = col1.date_input("തീയതി")
-            crop = col2.text_input("വിള (ഉദാ: ഏലം)")
-            qty = col1.number_input("അളവ് (kg)", min_value=0.0, step=1.0)
-            total = col2.number_input("ആകെ തുക (₹)", min_value=0.0, step=100.0)
-            buyer = st.text_input("വാങ്ങിയ ആൾ / സ്ഥാപനം")
-            
-            if st.form_submit_button("സേവ് ചെയ്യുക", use_container_width=True):
-                conn.execute("INSERT INTO sales (user, date, crop, qty, total, buyer) VALUES (?, ?, ?, ?, ?, ?)",
-                             (curr_user, str(date), crop, qty, total, buyer))
-                conn.commit()
-                st.success("വിൽപ്പന വിവരങ്ങൾ സേവ് ചെയ്തു!")
-                st.rerun()
-
-    # --- 9. MASTER SETTINGS (RESTRICTED TO ADMIN FOR USERS TABLE) ---
-    elif menu == "⚙️ മാസ്റ്റർ ക്രമീകരണങ്ങൾ":
-        st.subheader("⚙️ മാസ്റ്റർ ക്രമീകരണങ്ങൾ")
-        
-        col_w1, col_w2 = st.columns(2)
-        with col_w1:
-            st.markdown("### 👷 തൊഴിലാളിയെ ചേർക്കുക")
-            with st.form("worker_add_form", clear_on_submit=True):
-                w_name = st.text_input("പേര്")
-                w_phone = st.text_input("ഫോൺ നമ്പർ")
-                if st.form_submit_button("സേവ് ചെയ്യുക"):
-                    if w_name.strip():
-                        conn.execute("INSERT INTO workers_master (user, name, phone) VALUES (?, ?, ?)",
-                                     (curr_user, w_name.strip(), w_phone))
-                        conn.commit()
-                        st.success("തൊഴിലാളിയെ ചേർത്തു!")
-                        st.rerun()
-
-        # Admin Only Section
-        if st.session_state.role == "admin":
-            st.write("---")
-            st.markdown("### 👥 സിസ്റ്റം യൂസർ മാനേജ്‌മെന്റ് (Admin Only)")
-            users_db = pd.read_sql_query("SELECT username AS 'യൂസർ നെയിം', role AS 'റോൾ' FROM users", conn)
-            st.dataframe(users_db, use_container_width=True)
+        logs_df = get_data("activity_logs")
+        if not logs_df.empty:
+            st.dataframe(logs_df)
         else:
-            st.write("---")
-            st.info("ℹ️ യൂസർ അക്കൗണ്ടുകൾ മാനേജ് ചെയ്യുന്നതിന് അഡ്മിൻ അനുവാദം ആവശ്യമാണ്.")
+            st.info("ആക്ടിവിറ്റി ലോഗുകൾ ഒന്നും ലഭ്യമല്ല.")
 
-    conn.close()
+    # 3. തൊഴിലാളി & UPI പേയ്‌മെന്റ് സിസ്റ്റം
+    elif menu == "തൊഴിലാളി & UPI പേയ്‌മെന്റ്":
+        st.subheader("👥 തൊഴിലാളി ഹാജറും UPI ഡിജിറ്റൽ പേയ്‌മെന്റും")
+        tab_a, tab_b, tab_c = st.tabs(["ഹാജർ രേഖപ്പെടുത്തൽ", "അഡ്വാൻസ് ലെഡ്ജർ", "UPI കൂലി നൽകൽ"])
+        
+        with tab_a:
+            with st.form("attendance_form"):
+                worker_name = st.text_input("തൊഴിലാളിയുടെ പേര്")
+                block_name = st.selectbox("ബ്ലോക്ക്", ["ബ്ലോക്ക് A (ഏലം)", "ബ്ലോക്ക് B (കുരുമുളക്)", "ബ്ലോക്ക് C (ജാതിക്ക)", "ജനറൽ"])
+                work_type = st.selectbox("ജോലിയുടെ തരം", ["ഏലം പറിപ്പ്", "വളപ്രയോഗം", "കള വെട്ടൽ", "മറ്റ്‌ പരിപാലനം"])
+                wage = st.number_input("ദിവസക്കൂലി (₹)", min_value=0.0, value=500.0)
+                date = st.date_input("തീയതി", datetime.now())
+                
+                submitted = st.form_submit_button("ഹാജർ സേവ് ചെയ്യുക")
+                if submitted and worker_name:
+                    ws = db.worksheet("workers")
+                    ws.append_row([worker_name, block_name, work_type, wage, "GPS Verified", str(date)])
+                    log_activity(st.session_state['username'], "ADD_ATTENDANCE", f"Added attendance for {worker_name}")
+                    st.success("ഹാജർ വിജയകരമായി സേവ് ചെയ്തു!")
+                    
+        with tab_b:
+            with st.form("advance_form"):
+                adv_worker = st.text_input("തൊഴിലാളിയുടെ പേര്")
+                adv_amount = st.number_input("മുൻകൂർ അഡ്വാൻസ് തുക (₹)", min_value=0.0, value=1000.0)
+                adv_date = st.date_input("തീയതി", datetime.now())
+                
+                adv_sub = st.form_submit_button("അഡ്വാൻസ് സേവ് ചെയ്യുക")
+                if adv_sub and adv_worker:
+                    ws = db.worksheet("advances")
+                    ws.append_row([adv_worker, adv_amount, str(adv_date)])
+                    log_activity(st.session_state['username'], "ADD_ADVANCE", f"Given advance to {adv_worker}")
+                    st.success("അഡ്വാൻസ് കണക്ക് സേവ് ചെയ്തു!")
+
+        with tab_c:
+            with st.form("upi_form"):
+                upi_worker = st.text_input("തൊഴിലാളിയുടെ പേര്")
+                upi_id = st.text_input("UPI ID / GPay Number")
+                pay_amount = st.number_input("നൽകേണ്ട കൂലി തുക (₹)", min_value=0.0, value=500.0)
+                
+                upi_sub = st.form_submit_button("UPI വഴി പണമടയ്ക്കുക")
+                if upi_sub and upi_id:
+                    upi_link = f"upi://pay?pa={upi_id}&pn={urllib.parse.quote(upi_worker)}&am={pay_amount}&cu=INR"
+                    log_activity(st.session_state['username'], "UPI_PAYMENT", f"Generated UPI pay link for {upi_worker}")
+                    st.success(f"🎉 {upi_worker}-ന് ₹ {pay_amount} നൽകാനുള്ള UPI ലിങ്ക് തയ്യാറാണ്!")
+                    st.markdown(f"📲 **[UPI ആപ്പ് വഴി പണമടയ്ക്കാൻ ഇവിടെ ക്ലിക്ക് ചെയ്യുക]({upi_link})**", unsafe_allow_html=True)
+
+    # 4. ലേബർ പ്രൊഡക്റ്റിവിറ്റി അനലിറ്റിക്സ്
+    elif menu == "ലേഖന വിശകലനം (Productivity)":
+        st.subheader("📈 ലേബർ പ്രൊഡക്റ്റിവിറ്റി അനലിറ്റിക്സ്")
+        yields_df = get_data("yields")
+        if not yields_df.empty:
+            st.dataframe(yields_df)
+        else:
+            st.info("വിളവെടുപ്പ് ഡാറ്റകൾ ലഭ്യമല്ല.")
+
+    # 5. മണ്ണുപരിശോധനാ ഫലങ്ങൾ
+    elif menu == "മണ്ണുപരിശോധന (Soil Test Log)":
+        st.subheader("🧪 തോട്ടം മണ്ണ് & ജല പരിശോധനാ റിപ്പോർട്ട് മാനേജർ")
+        with st.form("soil_form"):
+            block_s = st.selectbox("ബ്ലോക്ക് തിരഞ്ഞെടുക്കുക", ["ബ്ലോക്ക് A (ഏലം)", "ബ്ലോക്ക് B (കുരുമുളക്)", "ബ്ലോക്ക് C (ജാതിക്ക)"])
+            soil_ph = st.number_input("മണ്ണിലെ pH നില (Soil pH Level)", min_value=0.0, max_value=14.0, value=6.2)
+            nutrients = st.text_input("പോഷക വിവരങ്ങൾ", value="Nitrogen: Medium, Phosphorus: High")
+            water_quality = st.selectbox("ജലത്തിന്റെ ഗുണനിലവാരം", ["ഉത്തമം (Good)", "ശ്രദ്ധിക്കുക (Moderate)", "മോശം (Poor)"])
+            date = st.date_input("തീയതി", datetime.now())
+            
+            if st.form_submit_button("പരിശോധനാ ഫലം സേവ് ചെയ്യുക"):
+                ws = db.worksheet("soil_tests")
+                ws.append_row([block_s, soil_ph, nutrients, water_quality, str(date)])
+                log_activity(st.session_state['username'], "ADD_SOIL_TEST", f"Added soil test for {block_s}")
+                st.success("മണ്ണുപരിശോധനാ ഫലം വിജയകരമായി സേവ് ചെയ്തു!")
+
+    # 6. എക്സ്പോർട്ട് & ഷിപ്പിംഗ് മാനേജർ
+    elif menu == "എക്സ്പോർട്ട് & ഷിപ്പിംഗ്":
+        st.subheader("🚢 അന്താരാഷ്ട്ര എക്സ്പോർട്ട് & ഷിപ്പിംഗ് ട്രാക്കർ")
+        with st.form("export_form"):
+            buyer_country = st.text_input("വാങ്ങുന്ന രാജ്യം / കമ്പനി")
+            export_crop = st.selectbox("കയറ്റി അയക്കുന്ന ഉത്പന്നം", ["ഏലം (Cardamom Grade A)", "കുരുമുളക്", "ജാതിക്ക"])
+            export_qty = st.number_input("അളവ് (കിലോയിൽ)", min_value=0.0, value=100.0)
+            shipping_cost = st.number_input("ഷിപ്പിംഗ് ചെലവ് (₹)", min_value=0.0, value=5000.0)
+            date = st.date_input("തീയതി", datetime.now())
+            
+            if st.form_submit_button("എക്സ്പോർട്ട് റെക്കോർഡ് സേവ് ചെയ്യുക") and buyer_country:
+                ws = db.worksheet("exports")
+                ws.append_row([buyer_country, export_crop, export_qty, shipping_cost, str(date)])
+                log_activity(st.session_state['username'], "ADD_EXPORT", f"Added export record for {buyer_country}")
+                st.success("എക്സ്പോർട്ട് വിവരങ്ങൾ സേവ് ചെയ്തു!")
+
+    # 7. AI തോട്ടം ചാറ്റ്‌ബോട്ട്
+    elif menu == "🤖 AI തോട്ടം ചാറ്റ്‌ബോട്ട്":
+        st.subheader("🤖 AI അഗ്രികൾച്ചർ അസിസ്റ്റന്റ് (Farming Chatbot)")
+        user_query = st.text_input("കൃഷി സംബന്ധമായ സംശയങ്ങൾ ഇവിടെ ചോദിക്കുക:")
+        if st.button("AI-യോട് ചോദിക്കുക"):
+            if user_query:
+                st.success("💡 **AI അസിസ്റ്റന്റിന്റെ മറുപടി:**")
+                st.write(f"'{user_query}' എന്ന വിഷയത്തിൽ, തോട്ടത്തിലെ നിലവിലെ മണ്ണും കാലാവസ്ഥയും പരിശോധിച്ച ശേഷം ആവശ്യത്തിന് വളപ്രയോഗവും ജലസേചനവും നടത്താൻ ശ്രദ്ധിക്കുക.")
+            else:
+                st.warning("ദയവായി ഒരു ചോദ്യം ടൈപ്പ് ചെയ്യുക.")
+
+    # 8. AI വിളവെടുപ്പ് പ്രവചനം
+    elif menu == "🔮 AI വിളവെടുപ്പ് പ്രവചനം":
+        st.subheader("🔮 AI വിളവെടുപ്പ് പ്രവചനം (Yield Predictive Analytics)")
+        if st.button("പ്രവചനം നടത്തുക"):
+            st.success("📊 **AI പ്രവചന റിസൾട്ട്:**")
+            col_p1, col_p2 = st.columns(2)
+            col_p1.metric("ഏലം", "approx. 420 kg", "+12%")
+            col_p2.metric("കുരുമുളക്", "approx. 280 kg", "+8%")
+
+    # 9. AI ചെലവ് ഒപ്റ്റിമൈസർ
+    elif menu == "💡 AI ചെലവ് ഒപ്റ്റിമൈസർ":
+        st.subheader("💡 AI ചെലവ് ഒപ്റ്റിമൈസേഷൻ & അഡ്വൈസറി")
+        if st.button("ചെലവ് വിശകലനം ചെയ്യുക"):
+            st.success("🔍 **AI നിർദ്ദേശങ്ങൾ:** രാസവളങ്ങൾക്ക് പകരം ജൈവവളങ്ങൾ ഉപയോഗിക്കുന്നത് വഴി 15% ചെലവ് കുറയ്ക്കാം.")
+
+    # 10. AI രോഗ നിർണ്ണയം
+    elif menu == "AI രോഗ നിർണ്ണയം (AI Diagnosis)":
+        st.subheader("🤖 AI അധിഷ്ഠിത സസ്യ രോഗ നിർണ്ണയം (AI Crop Doctor)")
+        uploaded_file = st.file_uploader("ഇലയുടെ ചിത്രം അപ്‌ലോഡ് ചെയ്യുക", type=["jpg", "png", "jpeg"])
+        if uploaded_file is not None:
+            st.image(uploaded_file, caption="അപ്‌ലോഡ് ചെയ്ത ചിത്രം", use_container_width=True)
+            if st.button("AI വിശകലനം നടത്തുക"):
+                st.success("🔬 **രോഗം കണ്ടെത്തൽ:** കാപ്സ്യൂൾ റോട്ട് (Capsule Rot). കോപ്പർ ഓക്‌സിക്ലോറൈഡ് മരുന്ന് തളിക്കുക.")
+
+    # 11. വോയ്സ് എൻട്രി
+    elif menu == "വോയ്സ് എൻട്രി (Voice Command)":
+        st.subheader("🎙️ മലയാളം വോയ്സ് കമാൻഡ് എൻട്രി")
+        voice_text = st.text_area("സംസാരിച്ചതിന്റെ ടെക്സ്റ്റ് രൂപം")
+        if st.button("സേവ് ചെയ്യുക"):
+            log_activity(st.session_state['username'], "VOICE_ENTRY", f"Saved voice entry: {voice_text}")
+            st.success("വോയ്സ് ഡാറ്റ സേവ് ചെയ്തു!")
+
+    # 12. വിളവെടുപ്പ് & ഗ്രേഡിംഗ്
+    elif menu == "വിളവെടുപ്പ് & ഗ്രേഡിംഗ്":
+        st.subheader("🌾 വിളവെടുപ്പും ബാച്ച് ട്രാക്കിംഗും")
+        with st.form("yield_form"):
+            crop_name = st.selectbox("വിള", ["ഏലം", "കുരുമുളക്", "ജാതിക്ക", "വഴന"])
+            block_source = st.selectbox("പ്ലോട്ട്", ["ബ്ലോക്ക് A", "ബ്ലോക്ക് B", "ബ്ലോക്ക് C"])
+            grade = st.selectbox("ഗ്രേഡ്", ["6mm", "7mm", "8mm", "Medium", "Bulk"])
+            quantity = st.number_input("അളവ് (കിലോയിൽ)", min_value=0.0, value=0.0)
+            batch_id = st.text_input("ബാച്ച് കോഡ്", value=f"BAT-{datetime.now().strftime('%d%m%Y')}")
+            date = st.date_input("തീയതി", datetime.now())
+            
+            if st.form_submit_button("വിവരങ്ങൾ ചേർക്കുക") and quantity > 0:
+                ws = db.worksheet("yields")
+                ws.append_row([crop_name, block_source, grade, quantity, batch_id, str(date)])
+                log_activity(st.session_state['username'], "ADD_YIELD", f"Added yield for {crop_name} ({quantity} kg)")
+                st.success("വിളവെടുപ്പ് വിവരങ്ങൾ സേവ് ചെയ്തു!")
+
+    # 13. ഇൻവെന്ററി
+    elif menu == "സ്റ്റോക്ക് & ഇൻവെന്ററി" and st.session_state["role"] == "Admin":
+        st.subheader("📦 വളങ്ങളും കീടനാശിനികളും (Inventory)")
+        with st.form("inv_form"):
+            item_name = st.text_input("പേര്")
+            category = st.selectbox("വിഭാഗം", ["വളങ്ങൾ", "കീടനാശിനികൾ", "ഉപകരണങ്ങൾ"])
+            quantity = st.number_input("അളവ്", min_value=0.0, value=10.0)
+            date = st.date_input("തീയതി", datetime.now())
+            if st.form_submit_button("സ്റ്റോക്ക് സേവ് ചെയ്യുക") and item_name:
+                ws = db.worksheet("inventory")
+                ws.append_row([item_name, category, quantity, str(date)])
+                log_activity(st.session_state['username'], "ADD_INVENTORY", f"Added inventory item {item_name}")
+                st.success("ഇൻവെന്ററി അപ്ഡേറ്റ് ചെയ്തു!")
+
+    # 14. വിൽപ്പനയും ബില്ലിംഗും
+    elif menu == "വിൽപ്പനയും ബില്ലിംഗും" and st.session_state["role"] == "Admin":
+        st.subheader("🧾 ഡിജിറ്റൽ ഇൻവോയ്സും QR കോഡ് ബില്ലിംഗും")
+        with st.form("sales_form"):
+            buyer_name = st.text_input("വായക്കാരന്റെ പേര്")
+            phone_no = st.text_input("ഫോൺ നമ്പർ (WhatsApp)")
+            crop_sold = st.selectbox("വിറ്റ ഉത്പന്നം", ["ഏലം", "കുരുമുളക്", "ജാതിക്ക", "വഴന"])
+            quantity_sold = st.number_input("അളവ് (കിലോയിൽ)", min_value=0.0, value=10.0)
+            price_per_kg = st.number_input("കിലോ വില (₹)", min_value=0.0, value=1650.0)
+            gst_percent = st.selectbox("GST (%)", [0, 5, 12, 18])
+            date = st.date_input("തീയതി", datetime.now())
+            
+            subtotal = quantity_sold * price_per_kg
+            total_amount = subtotal + (subtotal * (gst_percent / 100))
+            
+            if st.form_submit_button("ബിൽ സേവ് ചെയ്യുക") and buyer_name:
+                ws = db.worksheet("sales")
+                ws.append_row([buyer_name, phone_no, crop_sold, quantity_sold, price_per_kg, gst_percent, total_amount, str(date)])
+                log_activity(st.session_state['username'], "ADD_SALE", f"Sold {crop_sold} to {buyer_name} for Rs. {total_amount}")
+                st.success(f"🎉 ബിൽ സേവ് ചെയ്തു! ആകെ: ₹ {total_amount:.2f}")
+
+    # 15. മെഷിനറി & ഫ്യുവൽ ലോഗ്
+    elif menu == "മെഷിനറി & ഫ്യുവൽ" and st.session_state["role"] == "Admin":
+        st.subheader("🚜 മെഷീൻ ഫ്യുവൽ & സർവീസ് ട്രാക്കർ")
+        with st.form("machinery_form"):
+            mach_name = st.text_input("മെഷീന്റെ പേര്")
+            fuel_cost = st.number_input("ചെലവ് (₹)", min_value=0.0, value=500.0)
+            service_note = st.text_area("വിശദാംശങ്ങൾ")
+            date = st.date_input("തീയതി", datetime.now())
+            if st.form_submit_button("സേവ് ചെയ്യുക") and mach_name:
+                ws = db.worksheet("machinery")
+                ws.append_row([mach_name, fuel_cost, service_note, str(date)])
+                log_activity(st.session_state['username'], "ADD_MACHINERY", f"Added machinery log for {mach_name}")
+                st.success("സേവ് ചെയ്തു!")
+
+    # 16. ചെലവ് കണക്കുകൾ
+    elif menu == "ചെലവ് കണക്കുകൾ" and st.session_state["role"] == "Admin":
+        st.subheader("💰 തോട്ടം ചെലവുകൾ രേഖപ്പെടുത്തുക")
+        with st.form("expense_form"):
+            category = st.selectbox("ചെലവ് ഇനം", ["വളം", "കൂലി", "മെഷിനറി", "മറ്റുള്ളവ"])
+            amount = st.number_input("തുക (₹)", min_value=0.0, value=1000.0)
+            description = st.text_area("വിശദാംശങ്ങൾ")
+            date = st.date_input("തീയതി", datetime.now())
+            if st.form_submit_button("ചെലവ് സേവ് ചെയ്യുക") and amount > 0:
+                ws = db.worksheet("expenses")
+                ws.append_row([category, amount, description, str(date)])
+                log_activity(st.session_state['username'], "ADD_EXPENSE", f"Added expense {category}: Rs. {amount}")
+                st.success("ചെലവ് സേവ് ചെയ്തു!")
+
+    # 17. ലാഭ-നഷ്ടക്കണക്ക് (P&L)
+    elif menu == "ലാഭ-നഷ്ടക്കണക്ക് (P&L)" and st.session_state["role"] == "Admin":
+        st.subheader("📈 തോട്ടത്തിന്റെ ലാഭ-നഷ്ട വിശകലനം (P&L)")
+        sales_df = get_data("sales")
+        expenses_df = get_data("expenses")
+        total_rev = sales_df['total_amount'].sum() if not sales_df.empty and 'total_amount' in sales_df.columns else 0.0
+        total_exp = expenses_df['amount'].sum() if not expenses_df.empty and 'amount' in expenses_df.columns else 0.0
+        net_profit = total_rev - total_exp
+        col1, col2, col3 = st.columns(3)
+        col1.metric("ആകെ വരുമാനം", f"₹ {total_rev:.2f}")
+        col2.metric("ആകെ ചെലവ്", f"₹ {total_exp:.2f}")
+        col3.metric("ശുദ്ധ ലാഭം", f"₹ {net_profit:.2f}")
+
+    # 18. റിപ്പോർട്ടുകൾ
+    elif menu == "റിപ്പോർട്ടുകൾ" and st.session_state["role"] == "Admin":
+        st.subheader("📈 സമഗ്രമായ ഡാറ്റാ റിപ്പോർട്ടുകൾ")
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(["ആക്ടിവിറ്റി ലോഗ്", "തൊഴിലാളികൾ", "മണ്ണുപരിശോധന", "എക്സ്പോർട്ട്", "വിളവെടുപ്പ്", "ഇൻവെന്ററി", "വിൽപ്പന", "മെഷിനറി", "ചെലവുകൾ"])
+        with tab1:
+            st.dataframe(get_data("activity_logs"))
+        with tab2:
+            st.dataframe(get_data("workers"))
+        with tab3:
+            st.dataframe(get_data("soil_tests"))
+        with tab4:
+            st.dataframe(get_data("exports"))
+        with tab5:
+            st.dataframe(get_data("yields"))
+        with tab6:
+            st.dataframe(get_data("inventory"))
+        with tab7:
+            st.dataframe(get_data("sales"))
+        with tab8:
+            st.dataframe(get_data("machinery"))
+        with tab9:
+            st.dataframe(get_data("expenses"))
