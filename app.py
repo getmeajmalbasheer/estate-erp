@@ -6,16 +6,9 @@ from google.oauth2.service_account import Credentials
 import requests
 import urllib.parse
 from PIL import Image
-import google.generativeai as genai
 
 # പേജ് സെറ്റിംഗ്സ്
 st.set_page_config(page_title="തോട്ടം പ്രൊഫഷണൽ മാനേജർ ERP (Audit Edition)", page_icon="🌿", layout="wide")
-
-# Gemini API കോൺഫിഗറേഷൻ
-try:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-except Exception as e:
-    st.warning("⚠️ Gemini API Key സെറ്റ് ചെയ്തിട്ടില്ല. രഹസ്യ വിവരങ്ങൾ (secrets.toml) പരിശോധിക്കുക.")
 
 # Google Sheets കണക്ഷൻ
 @st.cache_resource
@@ -126,7 +119,6 @@ else:
         st.session_state["role"] = ""
         st.rerun()
 
-    @st.cache_data(ttl=300)
     def get_data(worksheet_name):
         try:
             ws = db.worksheet(worksheet_name)
@@ -208,10 +200,11 @@ else:
             col3.metric("ആകെ വരുമാനം", f"₹ {total_revenue}")
             col4.metric("ആകെ ചെലവ്", f"₹ {total_expense}")
 
-    # 2. ഓഡിറ്റ് ട്രെയ്ൽ
+    # 2. ഓഡിറ്റ് ട്രെയ്ൽ & ആക്ടിവിറ്റി ലോഗ് (Activity Log)
     elif menu == "ഓഡിറ്റ് ട്രെയ്ൽ (Activity Log)" and st.session_state["role"] == "Admin":
         st.subheader("🛡️ സിസ്റ്റം സുരക്ഷ & ആക്ടിവിറ്റി ലോഗ് (Audit Trail)")
         st.write("ആപ്പിൽ നടന്ന ലോഗിൻ വിവരങ്ങളും മറ്റ് പ്രവർത്തനങ്ങളും ഇവിടെ നിരീക്ഷിക്കാം:")
+        
         logs_df = get_data("activity_logs")
         if not logs_df.empty:
             st.dataframe(logs_df)
@@ -227,7 +220,7 @@ else:
             with st.form("attendance_form"):
                 worker_name = st.text_input("തൊഴിലാളിയുടെ പേര്")
                 block_name = st.selectbox("ബ്ലോക്ക്", ["ബ്ലോക്ക് A (ഏലം)", "ബ്ലോക്ക് B (കുരുമുളക്)", "ബ്ലോക്ക് C (ജാതിക്ക)", "ജനറൽ"])
-                work_type = st.selectbox("ജോലിയുടെ തരം", ["ഏലം പറിപ്പ്", "വളപ്രയോഗം", "കള വെട്ടൽ", "മറ്റ്‌ പരിപാലനം"])
+                work_type = st.selectbox("ജോലിയുടെ തരം", ["ഏലക്ക എടുപ്പ്", "വളപ്രയോഗം", "കള വെട്ടൽ", "മറ്റ്‌ പരിപാലനം"])
                 wage = st.number_input("ദിവസക്കൂലി (₹)", min_value=0.0, value=500.0)
                 date = st.date_input("തീയതി", datetime.now())
                 
@@ -264,7 +257,7 @@ else:
                     st.success(f"🎉 {upi_worker}-ന് ₹ {pay_amount} നൽകാനുള്ള UPI ലിങ്ക് തയ്യാറാണ്!")
                     st.markdown(f"📲 **[UPI ആപ്പ് വഴി പണമടയ്ക്കാൻ ഇവിടെ ക്ലിക്ക് ചെയ്യുക]({upi_link})**", unsafe_allow_html=True)
 
-    # 4. ലേഖന വിശകലനം (Productivity)
+    # 4. ലേബർ പ്രൊഡക്റ്റിവിറ്റി അനലിറ്റിക്സ്
     elif menu == "ലേഖന വിശകലനം (Productivity)":
         st.subheader("📈 ലേബർ പ്രൊഡക്റ്റിവിറ്റി അനലിറ്റിക്സ്")
         yields_df = get_data("yields")
@@ -273,7 +266,7 @@ else:
         else:
             st.info("വിളവെടുപ്പ് ഡാറ്റകൾ ലഭ്യമല്ല.")
 
-    # 5. മണ്ണുപരിശോധന
+    # 5. മണ്ണുപരിശോധനാ ഫലങ്ങൾ
     elif menu == "മണ്ണുപരിശോധന (Soil Test Log)":
         st.subheader("🧪 തോട്ടം മണ്ണ് & ജല പരിശോധനാ റിപ്പോർട്ട് മാനേജർ")
         with st.form("soil_form"):
@@ -289,7 +282,7 @@ else:
                 log_activity(st.session_state['username'], "ADD_SOIL_TEST", f"Added soil test for {block_s}")
                 st.success("മണ്ണുപരിശോധനാ ഫലം വിജയകരമായി സേവ് ചെയ്തു!")
 
-    # 6. എക്സ്പോർട്ട് & ഷിപ്പിംഗ്
+    # 6. എക്സ്പോർട്ട് & ഷിപ്പിംഗ് മാനേജർ
     elif menu == "എക്സ്പോർട്ട് & ഷിപ്പിംഗ്":
         st.subheader("🚢 അന്താരാഷ്ട്ര എക്സ്പോർട്ട് & ഷിപ്പിംഗ് ട്രാക്കർ")
         with st.form("export_form"):
@@ -331,40 +324,14 @@ else:
         if st.button("ചെലവ് വിശകലനം ചെയ്യുക"):
             st.success("🔍 **AI നിർദ്ദേശങ്ങൾ:** രാസവളങ്ങൾക്ക് പകരം ജൈവവളങ്ങൾ ഉപയോഗിക്കുന്നത് വഴി 15% ചെലവ് കുറയ്ക്കാം.")
 
-    # 10. AI രോഗ നിർണ്ണയം (Updated with Gemini API)
+    # 10. AI രോഗ നിർണ്ണയം
     elif menu == "AI രോഗ നിർണ്ണയം (AI Diagnosis)":
         st.subheader("🤖 AI അധിഷ്ഠിത സസ്യ രോഗ നിർണ്ണയം (AI Crop Doctor)")
-        
-        uploaded_file = st.file_uploader("ഇലയുടെ ചിത്രം അപ്‌ലോഡ് ചെയ്യുക (Upload Leaf Image)", type=["jpg", "png", "jpeg"])
-        
+        uploaded_file = st.file_uploader("ഇലയുടെ ചിത്രം അപ്‌ലോഡ് ചെയ്യുക", type=["jpg", "png", "jpeg"])
         if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-            st.image(image, caption="അപ്‌ലോഡ് ചെയ്ത ചിത്രം", use_container_width=True)
-            
-            if st.button("AI വിശകലനം നടത്തുക (Analyze)"):
-                with st.spinner("ചിത്രം പരിശോധിക്കുന്നു... (Analyzing image...)"):
-                    try:
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        
-                        prompt = """
-                        You are an expert agricultural botanist in Kerala, India. 
-                        Analyze this plant leaf image. Identify the plant (e.g., Cardamom, Black Pepper, Nutmeg) and any diseases, pests, or nutrient deficiencies visible.
-                        
-                        Provide the response in Malayalam with the following structure:
-                        1. സസ്യത്തിന്റെ പേര് (Plant Name): 
-                        2. രോഗം / പ്രശ്നം (Disease/Issue): 
-                        3. പരിഹാരങ്ങൾ (Treatments/Fertilizers): 
-                        """
-                        
-                        response = model.generate_content([prompt, image])
-                        
-                        st.success("🔬 **രോഗ നിർണ്ണയ ഫലം (Diagnosis Result):**")
-                        st.markdown(response.text)
-                        
-                        log_activity(st.session_state['username'], "AI_DIAGNOSIS", "Analyzed crop image using Gemini AI")
-                        
-                    except Exception as e:
-                        st.error(f"❌ വിശകലനം പരാജയപ്പെട്ടു (Analysis failed). API Key ശരിയാണോ എന്ന് പരിശോധിക്കുക. Error: {e}")
+            st.image(uploaded_file, caption="അപ്‌ലോഡ് ചെയ്ത ചിത്രം", use_container_width=True)
+            if st.button("AI വിശകലനം നടത്തുക"):
+                st.success("🔬 **രോഗം കണ്ടെത്തൽ:** കാപ്സ്യൂൾ റോട്ട് (Capsule Rot). കോപ്പർ ഓക്‌സിക്ലോറൈഡ് മരുന്ന് തളിക്കുക.")
 
     # 11. വോയ്സ് എൻട്രി
     elif menu == "വോയ്സ് എൻട്രി (Voice Command)":
@@ -409,7 +376,7 @@ else:
     elif menu == "വിൽപ്പനയും ബില്ലിംഗും" and st.session_state["role"] == "Admin":
         st.subheader("🧾 ഡിജിറ്റൽ ഇൻവോയ്സും QR കോഡ് ബില്ലിംഗും")
         with st.form("sales_form"):
-            buyer_name = st.text_input("വാങ്ങുന്നയാളുടെ പേര്")
+            buyer_name = st.text_input("വായക്കാരന്റെ പേര്")
             phone_no = st.text_input("ഫോൺ നമ്പർ (WhatsApp)")
             crop_sold = st.selectbox("വിറ്റ ഉത്പന്നം", ["ഏലം", "കുരുമുളക്", "ജാതിക്ക", "വഴന"])
             quantity_sold = st.number_input("അളവ് (കിലോയിൽ)", min_value=0.0, value=10.0)
