@@ -105,7 +105,7 @@ if not st.session_state["logged_in"]:
 
 else:
     if db is None:
-        st.error("⚠️ ഗൂഗിൾ ഷീറ്റ് കണക്ഷൻ പരാജയപ്പെട്ടു!")
+        st.error("⚠️ ഗൂഗിൾ ഷീറ്റ് കണക്ഷൻ പരാജയപ്പെട്ടു! ദയവായി st.secrets പരിശോധിക്കുക.")
         st.stop()
 
     st.sidebar.success(f"ലോഗിൻ ചെയ്തിരിക്കുന്നു:\n**{st.session_state['username']}**")
@@ -200,7 +200,7 @@ else:
             col3.metric("ആകെ വരുമാനം", f"₹ {total_revenue}")
             col4.metric("ആകെ ചെലവ്", f"₹ {total_expense}")
 
-    # 2. ഓഡിറ്റ് ട്രെയ്ൽ & ആക്ടിവിറ്റി ലോഗ് (Activity Log)
+    # 2. ഓഡിറ്റ് ട്രെയ്ൽ & ആക്ടിവിറ്റി ലോഗ്
     elif menu == "ഓഡിറ്റ് ട്രെയ്ൽ (Activity Log)" and st.session_state["role"] == "Admin":
         st.subheader("🛡️ സിസ്റ്റം സുരക്ഷ & ആക്ടിവിറ്റി ലോഗ് (Audit Trail)")
         st.write("ആപ്പിൽ നടന്ന ലോഗിൻ വിവരങ്ങളും മറ്റ് പ്രവർത്തനങ്ങളും ഇവിടെ നിരീക്ഷിക്കാം:")
@@ -230,7 +230,7 @@ else:
                     ws.append_row([worker_name, block_name, work_type, wage, "GPS Verified", str(date)])
                     log_activity(st.session_state['username'], "ADD_ATTENDANCE", f"Added attendance for {worker_name}")
                     st.success("ഹാജർ വിജയകരമായി സേവ് ചെയ്തു!")
-                    
+                
         with tab_b:
             with st.form("advance_form"):
                 adv_worker = st.text_input("തൊഴിലാളിയുടെ പേര്")
