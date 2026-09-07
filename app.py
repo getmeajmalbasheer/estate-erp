@@ -219,7 +219,7 @@ else:
         with tab_a:
             with st.form("attendance_form"):
                 worker_name = st.text_input("തൊഴിലാളിയുടെ പേര്")
-                block_name = st.selectbox("ബ്ലോക്ക്", ["പുഷ്പ്പക്കണ്ടം", "കോമ്പയാർ", "കൊമ്പമുക്ക്", "ജനറൽ"])
+                block_name = st.selectbox("പ്ലോട്ട്", ["പുഷ്പ്പക്കണ്ടം", "കോമ്പയാർ", "കൊമ്പമുക്ക്", "ജനറൽ"])
                 work_type = st.selectbox("ജോലിയുടെ തരം", ["ഏലക്ക എടുപ്പ്", "വളപ്രയോഗം", "മരുന്നടി", "ഫോളിയർ സ്പ്രേ", "ഡ്രെഡ്ജിംഗ്", "നനയ്ക്കൽ", "പുതയിടൽ", "തടം എടുക്കൽ", "ഏലം നടീൽ", "ഏലക്ക ഉണക്കൽ", "മരക്കൊമ്പ് വെട്ടൽ", "കള വെട്ടൽ", "മറ്റ്‌ പരിപാലനം"])
                 wage = st.number_input("ദിവസക്കൂലി (₹)", min_value=0.0, value=500.0)
                 date = st.date_input("തീയതി", datetime.now())
@@ -346,7 +346,7 @@ else:
         st.subheader("🌾 വിളവെടുപ്പും ബാച്ച് ട്രാക്കിംഗും")
         with st.form("yield_form"):
             crop_name = st.selectbox("വിള", ["ഏലം", "കുരുമുളക്", "ജാതിക്ക", "വഴന"])
-            block_source = st.selectbox("പ്ലോട്ട്", ["ബ്ലോക്ക് A", "ബ്ലോക്ക് B", "ബ്ലോക്ക് C"])
+            block_source = st.selectbox("പ്ലോട്ട്", ["പുഷ്പ്പക്കണ്ടം", "കോമ്പയാർ", "കൊമ്പമുക്"])
             grade = st.selectbox("ഗ്രേഡ്", ["6mm", "7mm", "8mm", "Medium", "Bulk"])
             quantity = st.number_input("അളവ് (കിലോയിൽ)", min_value=0.0, value=0.0)
             batch_id = st.text_input("ബാച്ച് കോഡ്", value=f"BAT-{datetime.now().strftime('%d%m%Y')}")
