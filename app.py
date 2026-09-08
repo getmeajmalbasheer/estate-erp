@@ -7,10 +7,14 @@ import requests
 import urllib.parse
 from PIL import Image
 
-# പേജ് സെറ്റിംഗ്സ്
-st.set_page_config(page_title="തോട്ടം പ്രൊഫഷണൽ മാനേജർ ERP (Audit Edition)", page_icon="🌿", layout="wide")
+# 1. Page Configuration
+st.set_page_config(
+    page_title="തോട്ടം പ്രൊഫഷണൽ മാനേജർ ERP (Audit Edition)", 
+    page_icon="🌿", 
+    layout="wide"
+)
 
-# Google Sheets കണക്ഷൻ
+# 2. Database Connection
 @st.cache_resource
 def get_db_connection():
     try:
@@ -21,22 +25,35 @@ def get_db_connection():
         sheet = client.open("Thottam_ERP_Database")
         return sheet
     except Exception as e:
+        st.error(f"Database Connection Error: {e}")
         return None
 
 db = get_db_connection()
 
-# ആക്ടിവിറ്റി ലോഗ് ചെയ്യാനുള്ള ഫങ്ഷൻ (Audit Trail)
+# 3. Helper Functions
 def log_activity(username, action_type, details):
-    try:
-        if db:
+    """Log system actions to activity_logs worksheet."""
+    if db:
+        try:
             ws = db.worksheet("activity_logs")
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ws.append_row([username, action_type, details, timestamp])
-    except:
-        pass
+        except Exception:
+            pass
 
-# തത്സമയ കാലാവസ്ഥാ ഫങ്ഷൻ
+def get_data(worksheet_name):
+    """Fetch worksheet records safely into a Pandas DataFrame."""
+    if not db:
+        return pd.DataFrame()
+    try:
+        ws = db.worksheet(worksheet_name)
+        data = ws.get_all_records()
+        return pd.DataFrame(data)
+    except Exception:
+        return pd.DataFrame()
+
 def get_weather():
+    """Fetch live weather data from Open-Meteo API."""
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=10.0889&longitude=77.0595&current=temperature_2m,relative_humidity_2m,precipitation"
         response = requests.get(url, timeout=3).json()
@@ -44,11 +61,11 @@ def get_weather():
         humidity = response['current']['relative_humidity_2m']
         rain = response['current']['precipitation']
         return temp, humidity, rain
-    except:
+    except Exception:
         return 24.5, 82.0, 0.0
 
-# വിപണി വില സിമുലേഷൻ
 def get_market_prices():
+    """Return simulated live market prices."""
     return {
         "ഏലം (Cardamom - 7mm/8mm)": "₹ 1,650 / kg",
         "കുരുമുളക് (Black Pepper)": "₹ 620 / kg",
@@ -56,12 +73,13 @@ def get_market_prices():
         "ജാതിപത്രി (Mace)": "₹ 1,150 / kg"
     }
 
-# സെഷൻ സ്റ്റേറ്റുകൾ പരിശോധിക്കുക
+# 4. Session State Initialization
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["username"] = ""
     st.session_state["role"] = ""
 
+# 5. Authentication Views
 if not st.session_state["logged_in"]:
     st.title("🌿 തോട്ടം പ്രൊഫഷണൽ മാനേജർ ERP (Audit Edition)")
     st.subheader("🔐 സിസ്റ്റത്തിലേക്ക് ലോഗിൻ ചെയ്യുക")
@@ -103,6 +121,7 @@ if not st.session_state["logged_in"]:
                 log_activity(worker_id, "WORKER_LOGIN", "Viewed digital passbook")
                 st.rerun()
 
+# 6. Authenticated User Interface
 else:
     if db is None:
         st.error("⚠️ ഗൂഗിൾ ഷീറ്റ് കണക്ഷൻ പരാജയപ്പെട്ടു! ദയവായി st.secrets പരിശോധിക്കുക.")
@@ -110,7 +129,7 @@ else:
 
     st.sidebar.success(f"ലോഗിൻ ചെയ്തിരിക്കുന്നു:\n**{st.session_state['username']}**")
     
-    lang = st.sidebar.selectbox("ভাষা / Language", ["മലയാളം", "English"])
+    lang = st.sidebar.selectbox("Language / ഭാഷ", ["മലയാളം", "English"])
 
     if st.sidebar.button("ലോഗ് ഔട്ട് (Logout)"):
         log_activity(st.session_state['username'], "LOGOUT", "Logged out from system")
@@ -119,31 +138,25 @@ else:
         st.session_state["role"] = ""
         st.rerun()
 
-    def get_data(worksheet_name):
-        try:
-            ws = db.worksheet(worksheet_name)
-            data = ws.get_all_records()
-            return pd.DataFrame(data)
-        except:
-            return pd.DataFrame()
-
+    # Worker Dashboard View
     if st.session_state["role"] == "Worker":
         st.subheader(f"📖 ഡിജിറ്റൽ പാസ്ബുക്ക് - {st.session_state['username']}")
         workers_df = get_data("workers")
         adv_df = get_data("advances")
         
         if not workers_df.empty and 'name' in workers_df.columns:
-            my_work = workers_df[workers_df['name'].str.lower() == st.session_state['username'].lower()]
+            my_work = workers_df[workers_df['name'].astype(str).str.lower() == st.session_state['username'].lower()]
             st.write("### ഹാജർ വിവരങ്ങൾ")
             st.dataframe(my_work)
             
         if not adv_df.empty and 'name' in adv_df.columns:
-            my_adv = adv_df[adv_df['name'].str.lower() == st.session_state['username'].lower()]
+            my_adv = adv_df[adv_df['name'].astype(str).str.lower() == st.session_state['username'].lower()]
             st.write("### അഡ്വാൻസ് വിവരങ്ങൾ")
             st.dataframe(my_adv)
             
         st.stop()
 
+    # Admin & Supervisor Navigation Configuration
     if st.session_state["role"] == "Admin":
         menu_items = [
             "ഡാഷ്‌ബോർഡ്", "ഓഡിറ്റ് ട്രെയ്ൽ (Activity Log)", "തൊഴിലാളി & UPI പേയ്‌മെന്റ്", 
@@ -158,7 +171,7 @@ else:
 
     menu = st.sidebar.selectbox("Navigation", menu_items)
 
-    # 1. ഡാഷ്‌ബോർഡ്
+    # 1. Dashboard Module
     if menu == "ഡാഷ്‌ബോർഡ്":
         st.subheader("📊 സ്മാർട്ട് ഡാഷ്‌ബോർഡും ലൈവ് വിപണി വിലയും")
         
@@ -189,29 +202,29 @@ else:
         sales_df = get_data("sales")
         
         total_workers = len(workers_df) if not workers_df.empty else 0
-        total_yield = yields_df['quantity'].sum() if not yields_df.empty and 'quantity' in yields_df.columns else 0
-        total_expense = expenses_df['amount'].sum() if not expenses_df.empty and 'amount' in expenses_df.columns else 0
-        total_revenue = sales_df['total_amount'].sum() if not sales_df.empty and 'total_amount' in sales_df.columns else 0
+        total_yield = pd.to_numeric(yields_df['quantity'], errors='coerce').sum() if not yields_df.empty and 'quantity' in yields_df.columns else 0.0
+        total_expense = pd.to_numeric(expenses_df['amount'], errors='coerce').sum() if not expenses_df.empty and 'amount' in expenses_df.columns else 0.0
+        total_revenue = pd.to_numeric(sales_df['total_amount'], errors='coerce').sum() if not sales_df.empty and 'total_amount' in sales_df.columns else 0.0
 
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("തൊഴിലാളികൾ", f"{total_workers} പേർ")
-        col2.metric("വിളവെടുപ്പ്", f"{total_yield} കിലോ")
+        col2.metric("വിളവെടുപ്പ്", f"{total_yield:.2f} കിലോ")
         if st.session_state["role"] == "Admin":
-            col3.metric("ആകെ വരുമാനം", f"₹ {total_revenue}")
-            col4.metric("ആകെ ചെലവ്", f"₹ {total_expense}")
+            col3.metric("ആകെ വരുമാനം", f"₹ {total_revenue:.2f}")
+            col4.metric("ആകെ ചെലവ്", f"₹ {total_expense:.2f}")
 
-    # 2. ഓഡിറ്റ് ട്രെയ്ൽ & ആക്ടിവിറ്റി ലോഗ്
+    # 2. Audit Trail Module
     elif menu == "ഓഡിറ്റ് ട്രെയ്ൽ (Activity Log)" and st.session_state["role"] == "Admin":
         st.subheader("🛡️ സിസ്റ്റം സുരക്ഷ & ആക്ടിവിറ്റി ലോഗ് (Audit Trail)")
         st.write("ആപ്പിൽ നടന്ന ലോഗിൻ വിവരങ്ങളും മറ്റ് പ്രവർത്തനങ്ങളും ഇവിടെ നിരീക്ഷിക്കാം:")
         
         logs_df = get_data("activity_logs")
         if not logs_df.empty:
-            st.dataframe(logs_df)
+            st.dataframe(logs_df, use_container_width=True)
         else:
             st.info("ആക്ടിവിറ്റി ലോഗുകൾ ഒന്നും ലഭ്യമല്ല.")
 
-    # 3. തൊഴിലാളി & UPI പേയ്‌മെന്റ് സിസ്റ്റം
+    # 3. Labor & Digital Payments
     elif menu == "തൊഴിലാളി & UPI പേയ്‌മെന്റ്":
         st.subheader("👥 തൊഴിലാളി ഹാജറും UPI ഡിജിറ്റൽ പേയ്‌മെന്റും")
         tab_a, tab_b, tab_c = st.tabs(["ഹാജർ രേഖപ്പെടുത്തൽ", "അഡ്വാൻസ് ലെഡ്ജർ", "UPI കൂലി നൽകൽ"])
@@ -257,16 +270,16 @@ else:
                     st.success(f"🎉 {upi_worker}-ന് ₹ {pay_amount} നൽകാനുള്ള UPI ലിങ്ക് തയ്യാറാണ്!")
                     st.markdown(f"📲 **[UPI ആപ്പ് വഴി പണമടയ്ക്കാൻ ഇവിടെ ക്ലിക്ക് ചെയ്യുക]({upi_link})**", unsafe_allow_html=True)
 
-    # 4. ലേബർ പ്രൊഡക്റ്റിവിറ്റി അനലിറ്റിക്സ്
+    # 4. Productivity Analytics
     elif menu == "ലേഖന വിശകലനം (Productivity)":
         st.subheader("📈 ലേബർ പ്രൊഡക്റ്റിവിറ്റി അനലിറ്റിക്സ്")
         yields_df = get_data("yields")
         if not yields_df.empty:
-            st.dataframe(yields_df)
+            st.dataframe(yields_df, use_container_width=True)
         else:
             st.info("വിളവെടുപ്പ് ഡാറ്റകൾ ലഭ്യമല്ല.")
 
-    # 5. മണ്ണുപരിശോധനാ ഫലങ്ങൾ
+    # 5. Soil Test Logging
     elif menu == "മണ്ണുപരിശോധന (Soil Test Log)":
         st.subheader("🧪 തോട്ടം മണ്ണ് & ജല പരിശോധനാ റിപ്പോർട്ട് മാനേജർ")
         with st.form("soil_form"):
@@ -282,7 +295,7 @@ else:
                 log_activity(st.session_state['username'], "ADD_SOIL_TEST", f"Added soil test for {block_s}")
                 st.success("മണ്ണുപരിശോധനാ ഫലം വിജയകരമായി സേവ് ചെയ്തു!")
 
-    # 6. എക്സ്പോർട്ട് & ഷിപ്പിംഗ് മാനേജർ
+    # 6. Export Tracking
     elif menu == "എക്സ്പോർട്ട് & ഷിപ്പിംഗ്":
         st.subheader("🚢 അന്താരാഷ്ട്ര എക്സ്പോർട്ട് & ഷിപ്പിംഗ് ട്രാക്കർ")
         with st.form("export_form"):
@@ -298,7 +311,7 @@ else:
                 log_activity(st.session_state['username'], "ADD_EXPORT", f"Added export record for {buyer_country}")
                 st.success("എക്സ്പോർട്ട് വിവരങ്ങൾ സേവ് ചെയ്തു!")
 
-    # 7. AI തോട്ടം ചാറ്റ്‌ബോട്ട്
+    # 7. AI Chatbot
     elif menu == "🤖 AI തോട്ടം ചാറ്റ്‌ബോട്ട്":
         st.subheader("🤖 AI അഗ്രികൾച്ചർ അസിസ്റ്റന്റ് (Farming Chatbot)")
         user_query = st.text_input("കൃഷി സംബന്ധമായ സംശയങ്ങൾ ഇവിടെ ചോദിക്കുക:")
@@ -309,7 +322,7 @@ else:
             else:
                 st.warning("ദയവായി ഒരു ചോദ്യം ടൈപ്പ് ചെയ്യുക.")
 
-    # 8. AI വിളവെടുപ്പ് പ്രവചനം
+    # 8. AI Yield Prediction
     elif menu == "🔮 AI വിളവെടുപ്പ് പ്രവചനം":
         st.subheader("🔮 AI വിളവെടുപ്പ് പ്രവചനം (Yield Predictive Analytics)")
         if st.button("പ്രവചനം നടത്തുക"):
@@ -318,13 +331,13 @@ else:
             col_p1.metric("ഏലം", "approx. 420 kg", "+12%")
             col_p2.metric("കുരുമുളക്", "approx. 280 kg", "+8%")
 
-    # 9. AI ചെലവ് ഒപ്റ്റിമൈസർ
+    # 9. AI Expense Optimizer
     elif menu == "💡 AI ചെലവ് ഒപ്റ്റിമൈസർ":
         st.subheader("💡 AI ചെലവ് ഒപ്റ്റിമൈസേഷൻ & അഡ്വൈസറി")
         if st.button("ചെലവ് വിശകലനം ചെയ്യുക"):
             st.success("🔍 **AI നിർദ്ദേശങ്ങൾ:** രാസവളങ്ങൾക്ക് പകരം ജൈവവളങ്ങൾ ഉപയോഗിക്കുന്നത് വഴി 15% ചെലവ് കുറയ്ക്കാം.")
 
-    # 10. AI രോഗ നിർണ്ണയം
+    # 10. AI Crop Diagnosis
     elif menu == "AI രോഗ നിർണ്ണയം (AI Diagnosis)":
         st.subheader("🤖 AI അധിഷ്ഠിത സസ്യ രോഗ നിർണ്ണയം (AI Crop Doctor)")
         uploaded_file = st.file_uploader("ഇലയുടെ ചിത്രം അപ്‌ലോഡ് ചെയ്യുക", type=["jpg", "png", "jpeg"])
@@ -333,7 +346,7 @@ else:
             if st.button("AI വിശകലനം നടത്തുക"):
                 st.success("🔬 **രോഗം കണ്ടെത്തൽ:** കാപ്സ്യൂൾ റോട്ട് (Capsule Rot). കോപ്പർ ഓക്‌സിക്ലോറൈഡ് മരുന്ന് തളിക്കുക.")
 
-    # 11. വോയ്സ് എൻട്രി
+    # 11. Voice Entry
     elif menu == "വോയ്സ് എൻട്രി (Voice Command)":
         st.subheader("🎙️ മലയാളം വോയ്സ് കമാൻഡ് എൻട്രി")
         voice_text = st.text_area("സംസാരിച്ചതിന്റെ ടെക്സ്റ്റ് രൂപം")
@@ -341,7 +354,7 @@ else:
             log_activity(st.session_state['username'], "VOICE_ENTRY", f"Saved voice entry: {voice_text}")
             st.success("വോയ്സ് ഡാറ്റ സേവ് ചെയ്തു!")
 
-    # 12. വിളവെടുപ്പ് & ഗ്രേഡിംഗ്
+    # 12. Harvesting & Grading
     elif menu == "വിളവെടുപ്പ് & ഗ്രേഡിംഗ്":
         st.subheader("🌾 വിളവെടുപ്പും ബാച്ച് ട്രാക്കിംഗും")
         with st.form("yield_form"):
@@ -358,7 +371,7 @@ else:
                 log_activity(st.session_state['username'], "ADD_YIELD", f"Added yield for {crop_name} ({quantity} kg)")
                 st.success("വിളവെടുപ്പ് വിവരങ്ങൾ സേവ് ചെയ്തു!")
 
-    # 13. ഇൻവെന്ററി
+    # 13. Inventory Management
     elif menu == "സ്റ്റോക്ക് & ഇൻവെന്ററി" and st.session_state["role"] == "Admin":
         st.subheader("📦 വളങ്ങളും കീടനാശിനികളും (Inventory)")
         with st.form("inv_form"):
@@ -372,7 +385,7 @@ else:
                 log_activity(st.session_state['username'], "ADD_INVENTORY", f"Added inventory item {item_name}")
                 st.success("ഇൻവെന്ററി അപ്ഡേറ്റ് ചെയ്തു!")
 
-    # 14. വിൽപ്പനയും ബില്ലിംഗും
+    # 14. Sales & Billing
     elif menu == "വിൽപ്പനയും ബില്ലിംഗും" and st.session_state["role"] == "Admin":
         st.subheader("🧾 ഡിജിറ്റൽ ഇൻവോയ്സും QR കോഡ് ബില്ലിംഗും")
         with st.form("sales_form"):
@@ -393,7 +406,7 @@ else:
                 log_activity(st.session_state['username'], "ADD_SALE", f"Sold {crop_sold} to {buyer_name} for Rs. {total_amount}")
                 st.success(f"🎉 ബിൽ സേവ് ചെയ്തു! ആകെ: ₹ {total_amount:.2f}")
 
-    # 15. മെഷിനറി & ഫ്യുവൽ ലോഗ്
+    # 15. Machinery & Fuel
     elif menu == "മെഷിനറി & ഫ്യുവൽ" and st.session_state["role"] == "Admin":
         st.subheader("🚜 മെഷീൻ ഫ്യുവൽ & സർവീസ് ട്രാക്കർ")
         with st.form("machinery_form"):
@@ -407,7 +420,7 @@ else:
                 log_activity(st.session_state['username'], "ADD_MACHINERY", f"Added machinery log for {mach_name}")
                 st.success("സേവ് ചെയ്തു!")
 
-    # 16. ചെലവ് കണക്കുകൾ
+    # 16. Expense Records
     elif menu == "ചെലവ് കണക്കുകൾ" and st.session_state["role"] == "Admin":
         st.subheader("💰 തോട്ടം ചെലവുകൾ രേഖപ്പെടുത്തുക")
         with st.form("expense_form"):
@@ -421,38 +434,43 @@ else:
                 log_activity(st.session_state['username'], "ADD_EXPENSE", f"Added expense {category}: Rs. {amount}")
                 st.success("ചെലവ് സേവ് ചെയ്തു!")
 
-    # 17. ലാഭ-നഷ്ടക്കണക്ക് (P&L)
+    # 17. Profit & Loss Statement
     elif menu == "ലാഭ-നഷ്ടക്കണക്ക് (P&L)" and st.session_state["role"] == "Admin":
         st.subheader("📈 തോട്ടത്തിന്റെ ലാഭ-നഷ്ട വിശകലനം (P&L)")
         sales_df = get_data("sales")
         expenses_df = get_data("expenses")
-        total_rev = sales_df['total_amount'].sum() if not sales_df.empty and 'total_amount' in sales_df.columns else 0.0
-        total_exp = expenses_df['amount'].sum() if not expenses_df.empty and 'amount' in expenses_df.columns else 0.0
+        
+        total_rev = pd.to_numeric(sales_df['total_amount'], errors='coerce').sum() if not sales_df.empty and 'total_amount' in sales_df.columns else 0.0
+        total_exp = pd.to_numeric(expenses_df['amount'], errors='coerce').sum() if not expenses_df.empty and 'amount' in expenses_df.columns else 0.0
         net_profit = total_rev - total_exp
+        
         col1, col2, col3 = st.columns(3)
         col1.metric("ആകെ വരുമാനം", f"₹ {total_rev:.2f}")
         col2.metric("ആകെ ചെലവ്", f"₹ {total_exp:.2f}")
         col3.metric("ശുദ്ധ ലാഭം", f"₹ {net_profit:.2f}")
 
-    # 18. റിപ്പോർട്ടുകൾ
+    # 18. Comprehensive Data Reports
     elif menu == "റിപ്പോർട്ടുകൾ" and st.session_state["role"] == "Admin":
         st.subheader("📈 സമഗ്രമായ ഡാറ്റാ റിപ്പോർട്ടുകൾ")
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(["ആക്ടിവിറ്റി ലോഗ്", "തൊഴിലാളികൾ", "മണ്ണുപരിശോധന", "എക്സ്പോർട്ട്", "വിളവെടുപ്പ്", "ഇൻവെന്ററി", "വിൽപ്പന", "മെഷിനറി", "ചെലവുകൾ"])
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+            "ആക്ടിവിറ്റി ലോഗ്", "തൊഴിലാളികൾ", "മണ്ണുപരിശോധന", "എക്സ്പോർട്ട്", 
+            "വിളവെടുപ്പ്", "ഇൻവെന്ററി", "വിൽപ്പന", "മെഷിനറി", "ചെലവുകൾ"
+        ])
         with tab1:
-            st.dataframe(get_data("activity_logs"))
+            st.dataframe(get_data("activity_logs"), use_container_width=True)
         with tab2:
-            st.dataframe(get_data("workers"))
+            st.dataframe(get_data("workers"), use_container_width=True)
         with tab3:
-            st.dataframe(get_data("soil_tests"))
+            st.dataframe(get_data("soil_tests"), use_container_width=True)
         with tab4:
-            st.dataframe(get_data("exports"))
+            st.dataframe(get_data("exports"), use_container_width=True)
         with tab5:
-            st.dataframe(get_data("yields"))
+            st.dataframe(get_data("yields"), use_container_width=True)
         with tab6:
-            st.dataframe(get_data("inventory"))
+            st.dataframe(get_data("inventory"), use_container_width=True)
         with tab7:
-            st.dataframe(get_data("sales"))
+            st.dataframe(get_data("sales"), use_container_width=True)
         with tab8:
-            st.dataframe(get_data("machinery"))
+            st.dataframe(get_data("machinery"), use_container_width=True)
         with tab9:
-            st.dataframe(get_data("expenses"))
+            st.dataframe(get_data("expenses"), use_container_width=True)
