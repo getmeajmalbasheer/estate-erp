@@ -41,6 +41,8 @@ def log_activity(username, action_type, details):
         except Exception:
             pass
 
+# ഗൂഗിൾ ഷീറ്റ് API ലിമിറ്റ് ഒഴിവാക്കാനുള്ള പുതിയ മാറ്റം 
+@st.cache_data(ttl=300)
 def get_data(worksheet_name):
     """Fetch worksheet records safely into a Pandas DataFrame."""
     if not db:
@@ -49,7 +51,8 @@ def get_data(worksheet_name):
         ws = db.worksheet(worksheet_name)
         data = ws.get_all_records()
         return pd.DataFrame(data)
-    except Exception:
+    except Exception as e:
+        print(f"Sheet read error: {e}")
         return pd.DataFrame()
 
 def get_weather():
@@ -241,6 +244,9 @@ else:
                 if submitted and worker_name:
                     ws = db.worksheet("workers")
                     ws.append_row([worker_name, block_name, work_type, wage, "GPS Verified", str(date)])
+                    
+                    get_data.clear() # Cache clear
+                    
                     log_activity(st.session_state['username'], "ADD_ATTENDANCE", f"Added attendance for {worker_name}")
                     st.success("ഹാജർ വിജയകരമായി സേവ് ചെയ്തു!")
                 
@@ -254,6 +260,9 @@ else:
                 if adv_sub and adv_worker:
                     ws = db.worksheet("advances")
                     ws.append_row([adv_worker, adv_amount, str(adv_date)])
+                    
+                    get_data.clear() # Cache clear
+                    
                     log_activity(st.session_state['username'], "ADD_ADVANCE", f"Given advance to {adv_worker}")
                     st.success("അഡ്വാൻസ് കണക്ക് സേവ് ചെയ്തു!")
 
@@ -292,6 +301,9 @@ else:
             if st.form_submit_button("പരിശോധനാ ഫലം സേവ് ചെയ്യുക"):
                 ws = db.worksheet("soil_tests")
                 ws.append_row([block_s, soil_ph, nutrients, water_quality, str(date)])
+                
+                get_data.clear() # Cache clear
+                
                 log_activity(st.session_state['username'], "ADD_SOIL_TEST", f"Added soil test for {block_s}")
                 st.success("മണ്ണുപരിശോധനാ ഫലം വിജയകരമായി സേവ് ചെയ്തു!")
 
@@ -308,6 +320,9 @@ else:
             if st.form_submit_button("എക്സ്പോർട്ട് റെക്കോർഡ് സേവ് ചെയ്യുക") and buyer_country:
                 ws = db.worksheet("exports")
                 ws.append_row([buyer_country, export_crop, export_qty, shipping_cost, str(date)])
+                
+                get_data.clear() # Cache clear
+                
                 log_activity(st.session_state['username'], "ADD_EXPORT", f"Added export record for {buyer_country}")
                 st.success("എക്സ്പോർട്ട് വിവരങ്ങൾ സേവ് ചെയ്തു!")
 
@@ -368,6 +383,9 @@ else:
             if st.form_submit_button("വിവരങ്ങൾ ചേർക്കുക") and quantity > 0:
                 ws = db.worksheet("yields")
                 ws.append_row([crop_name, block_source, grade, quantity, batch_id, str(date)])
+                
+                get_data.clear() # Cache clear
+                
                 log_activity(st.session_state['username'], "ADD_YIELD", f"Added yield for {crop_name} ({quantity} kg)")
                 st.success("വിളവെടുപ്പ് വിവരങ്ങൾ സേവ് ചെയ്തു!")
 
@@ -382,6 +400,9 @@ else:
             if st.form_submit_button("സ്റ്റോക്ക് സേവ് ചെയ്യുക") and item_name:
                 ws = db.worksheet("inventory")
                 ws.append_row([item_name, category, quantity, str(date)])
+                
+                get_data.clear() # Cache clear
+                
                 log_activity(st.session_state['username'], "ADD_INVENTORY", f"Added inventory item {item_name}")
                 st.success("ഇൻവെന്ററി അപ്ഡേറ്റ് ചെയ്തു!")
 
@@ -389,7 +410,7 @@ else:
     elif menu == "വിൽപ്പനയും ബില്ലിംഗും" and st.session_state["role"] == "Admin":
         st.subheader("🧾 ഡിജിറ്റൽ ഇൻവോയ്സും QR കോഡ് ബില്ലിംഗും")
         with st.form("sales_form"):
-            buyer_name = st.text_input("വായക്കാരന്റെ പേര്")
+            buyer_name = st.text_input("വാങ്ങുന്ന ആളുടെ പേര്")
             phone_no = st.text_input("ഫോൺ നമ്പർ (WhatsApp)")
             crop_sold = st.selectbox("വിറ്റ ഉത്പന്നം", ["ഏലം", "കുരുമുളക്", "ജാതിക്ക", "വഴന"])
             quantity_sold = st.number_input("അളവ് (കിലോയിൽ)", min_value=0.0, value=10.0)
@@ -403,6 +424,9 @@ else:
             if st.form_submit_button("ബിൽ സേവ് ചെയ്യുക") and buyer_name:
                 ws = db.worksheet("sales")
                 ws.append_row([buyer_name, phone_no, crop_sold, quantity_sold, price_per_kg, gst_percent, total_amount, str(date)])
+                
+                get_data.clear() # Cache clear
+                
                 log_activity(st.session_state['username'], "ADD_SALE", f"Sold {crop_sold} to {buyer_name} for Rs. {total_amount}")
                 st.success(f"🎉 ബിൽ സേവ് ചെയ്തു! ആകെ: ₹ {total_amount:.2f}")
 
@@ -417,6 +441,9 @@ else:
             if st.form_submit_button("സേവ് ചെയ്യുക") and mach_name:
                 ws = db.worksheet("machinery")
                 ws.append_row([mach_name, fuel_cost, service_note, str(date)])
+                
+                get_data.clear() # Cache clear
+                
                 log_activity(st.session_state['username'], "ADD_MACHINERY", f"Added machinery log for {mach_name}")
                 st.success("സേവ് ചെയ്തു!")
 
@@ -431,6 +458,9 @@ else:
             if st.form_submit_button("ചെലവ് സേവ് ചെയ്യുക") and amount > 0:
                 ws = db.worksheet("expenses")
                 ws.append_row([category, amount, description, str(date)])
+                
+                get_data.clear() # Cache clear
+                
                 log_activity(st.session_state['username'], "ADD_EXPENSE", f"Added expense {category}: Rs. {amount}")
                 st.success("ചെലവ് സേവ് ചെയ്തു!")
 
