@@ -32,16 +32,15 @@ db = get_db_connection()
 
 # 3. Helper Functions
 def log_activity(username, action_type, details):
-    """Log system actions to activity_logs worksheet."""
+    """Log system actions to activity_logs worksheet safely."""
     if db:
         try:
             ws = db.worksheet("activity_logs")
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ws.append_row([username, action_type, details, timestamp])
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Logging error: {e}")
 
-# ഗൂഗിൾ ഷീറ്റ് API ലിമിറ്റ് ഒഴിവാക്കാനുള്ള പുതിയ മാറ്റം 
 @st.cache_data(ttl=300)
 def get_data(worksheet_name):
     """Fetch worksheet records safely into a Pandas DataFrame."""
@@ -52,8 +51,22 @@ def get_data(worksheet_name):
         data = ws.get_all_records()
         return pd.DataFrame(data)
     except Exception as e:
-        print(f"Sheet read error: {e}")
+        print(f"Sheet read error [{worksheet_name}]: {e}")
         return pd.DataFrame()
+
+def write_data(worksheet_name, row_data):
+    """Safely append row data to a specific worksheet."""
+    if not db:
+        st.error("Database connection unavailable.")
+        return False
+    try:
+        ws = db.worksheet(worksheet_name)
+        ws.append_row(row_data)
+        get_data.clear()  # Invalidate read cache
+        return True
+    except Exception as e:
+        st.error(f"Failed to save record to Google Sheets: {e}")
+        return False
 
 def get_weather():
     """Fetch live weather data from Open-Meteo API."""
@@ -68,7 +81,7 @@ def get_weather():
         return 24.5, 82.0, 0.0
 
 def get_market_prices():
-    """Return simulated live market prices."""
+    """Return live market prices."""
     return {
         "ഏലം (Cardamom - 7mm/8mm)": "₹ 1,650 / kg",
         "കുരുമുളക് (Black Pepper)": "₹ 620 / kg",
@@ -131,7 +144,6 @@ else:
         st.stop()
 
     st.sidebar.success(f"ലോഗിൻ ചെയ്തിരിക്കുന്നു:\n**{st.session_state['username']}**")
-    
     lang = st.sidebar.selectbox("Language / ഭാഷ", ["മലയാളം", "English"])
 
     if st.sidebar.button("ലോഗ് ഔട്ട് (Logout)"):
@@ -150,12 +162,12 @@ else:
         if not workers_df.empty and 'name' in workers_df.columns:
             my_work = workers_df[workers_df['name'].astype(str).str.lower() == st.session_state['username'].lower()]
             st.write("### ഹാജർ വിവരങ്ങൾ")
-            st.dataframe(my_work)
+            st.dataframe(my_work, use_container_width=True)
             
         if not adv_df.empty and 'name' in adv_df.columns:
             my_adv = adv_df[adv_df['name'].astype(str).str.lower() == st.session_state['username'].lower()]
             st.write("### അഡ്വാൻസ് വിവരങ്ങൾ")
-            st.dataframe(my_adv)
+            st.dataframe(my_adv, use_container_width=True)
             
         st.stop()
 
@@ -242,13 +254,9 @@ else:
                 
                 submitted = st.form_submit_button("ഹാജർ സേവ് ചെയ്യുക")
                 if submitted and worker_name:
-                    ws = db.worksheet("workers")
-                    ws.append_row([worker_name, block_name, work_type, wage, "GPS Verified", str(date)])
-                    
-                    get_data.clear() # Cache clear
-                    
-                    log_activity(st.session_state['username'], "ADD_ATTENDANCE", f"Added attendance for {worker_name}")
-                    st.success("ഹാജർ വിജയകരമായി സേവ് ചെയ്തു!")
+                    if write_data("workers", [worker_name, block_name, work_type, wage, "GPS Verified", str(date)]):
+                        log_activity(st.session_state['username'], "ADD_ATTENDANCE", f"Added attendance for {worker_name}")
+                        st.success("ഹാജർ വിജയകരമായി സേവ് ചെയ്തു!")
                 
         with tab_b:
             with st.form("advance_form"):
@@ -258,13 +266,9 @@ else:
                 
                 adv_sub = st.form_submit_button("അഡ്വാൻസ് സേവ് ചെയ്യുക")
                 if adv_sub and adv_worker:
-                    ws = db.worksheet("advances")
-                    ws.append_row([adv_worker, adv_amount, str(adv_date)])
-                    
-                    get_data.clear() # Cache clear
-                    
-                    log_activity(st.session_state['username'], "ADD_ADVANCE", f"Given advance to {adv_worker}")
-                    st.success("അഡ്വാൻസ് കണക്ക് സേവ് ചെയ്തു!")
+                    if write_data("advances", [adv_worker, adv_amount, str(adv_date)]):
+                        log_activity(st.session_state['username'], "ADD_ADVANCE", f"Given advance to {adv_worker}")
+                        st.success("അഡ്വാൻസ് കണക്ക് സേവ് ചെയ്തു!")
 
         with tab_c:
             with st.form("upi_form"):
@@ -299,13 +303,9 @@ else:
             date = st.date_input("തീയതി", datetime.now())
             
             if st.form_submit_button("പരിശോധനാ ഫലം സേവ് ചെയ്യുക"):
-                ws = db.worksheet("soil_tests")
-                ws.append_row([block_s, soil_ph, nutrients, water_quality, str(date)])
-                
-                get_data.clear() # Cache clear
-                
-                log_activity(st.session_state['username'], "ADD_SOIL_TEST", f"Added soil test for {block_s}")
-                st.success("മണ്ണുപരിശോധനാ ഫലം വിജയകരമായി സേവ് ചെയ്തു!")
+                if write_data("soil_tests", [block_s, soil_ph, nutrients, water_quality, str(date)]):
+                    log_activity(st.session_state['username'], "ADD_SOIL_TEST", f"Added soil test for {block_s}")
+                    st.success("മണ്ണുപരിശോധനാ ഫലം വിജയകരമായി സേവ് ചെയ്തു!")
 
     # 6. Export Tracking
     elif menu == "എക്സ്പോർട്ട് & ഷിപ്പിംഗ്":
@@ -318,13 +318,9 @@ else:
             date = st.date_input("തീയതി", datetime.now())
             
             if st.form_submit_button("എക്സ്പോർട്ട് റെക്കോർഡ് സേവ് ചെയ്യുക") and buyer_country:
-                ws = db.worksheet("exports")
-                ws.append_row([buyer_country, export_crop, export_qty, shipping_cost, str(date)])
-                
-                get_data.clear() # Cache clear
-                
-                log_activity(st.session_state['username'], "ADD_EXPORT", f"Added export record for {buyer_country}")
-                st.success("എക്സ്പോർട്ട് വിവരങ്ങൾ സേവ് ചെയ്തു!")
+                if write_data("exports", [buyer_country, export_crop, export_qty, shipping_cost, str(date)]):
+                    log_activity(st.session_state['username'], "ADD_EXPORT", f"Added export record for {buyer_country}")
+                    st.success("എക്സ്പോർട്ട് വിവരങ്ങൾ സേവ് ചെയ്തു!")
 
     # 7. AI Chatbot
     elif menu == "🤖 AI തോട്ടം ചാറ്റ്‌ബോട്ട്":
@@ -381,13 +377,9 @@ else:
             date = st.date_input("തീയതി", datetime.now())
             
             if st.form_submit_button("വിവരങ്ങൾ ചേർക്കുക") and quantity > 0:
-                ws = db.worksheet("yields")
-                ws.append_row([crop_name, block_source, grade, quantity, batch_id, str(date)])
-                
-                get_data.clear() # Cache clear
-                
-                log_activity(st.session_state['username'], "ADD_YIELD", f"Added yield for {crop_name} ({quantity} kg)")
-                st.success("വിളവെടുപ്പ് വിവരങ്ങൾ സേവ് ചെയ്തു!")
+                if write_data("yields", [crop_name, block_source, grade, quantity, batch_id, str(date)]):
+                    log_activity(st.session_state['username'], "ADD_YIELD", f"Added yield for {crop_name} ({quantity} kg)")
+                    st.success("വിളവെടുപ്പ് വിവരങ്ങൾ സേവ് ചെയ്തു!")
 
     # 13. Inventory Management
     elif menu == "സ്റ്റോക്ക് & ഇൻവെന്ററി" and st.session_state["role"] == "Admin":
@@ -398,13 +390,9 @@ else:
             quantity = st.number_input("അളവ്", min_value=0.0, value=10.0)
             date = st.date_input("തീയതി", datetime.now())
             if st.form_submit_button("സ്റ്റോക്ക് സേവ് ചെയ്യുക") and item_name:
-                ws = db.worksheet("inventory")
-                ws.append_row([item_name, category, quantity, str(date)])
-                
-                get_data.clear() # Cache clear
-                
-                log_activity(st.session_state['username'], "ADD_INVENTORY", f"Added inventory item {item_name}")
-                st.success("ഇൻവെന്ററി അപ്ഡേറ്റ് ചെയ്തു!")
+                if write_data("inventory", [item_name, category, quantity, str(date)]):
+                    log_activity(st.session_state['username'], "ADD_INVENTORY", f"Added inventory item {item_name}")
+                    st.success("ഇൻവെന്ററി അപ്ഡേറ്റ് ചെയ്തു!")
 
     # 14. Sales & Billing
     elif menu == "വിൽപ്പനയും ബില്ലിംഗും" and st.session_state["role"] == "Admin":
@@ -422,13 +410,9 @@ else:
             total_amount = subtotal + (subtotal * (gst_percent / 100))
             
             if st.form_submit_button("ബിൽ സേവ് ചെയ്യുക") and buyer_name:
-                ws = db.worksheet("sales")
-                ws.append_row([buyer_name, phone_no, crop_sold, quantity_sold, price_per_kg, gst_percent, total_amount, str(date)])
-                
-                get_data.clear() # Cache clear
-                
-                log_activity(st.session_state['username'], "ADD_SALE", f"Sold {crop_sold} to {buyer_name} for Rs. {total_amount}")
-                st.success(f"🎉 ബിൽ സേവ് ചെയ്തു! ആകെ: ₹ {total_amount:.2f}")
+                if write_data("sales", [buyer_name, phone_no, crop_sold, quantity_sold, price_per_kg, gst_percent, total_amount, str(date)]):
+                    log_activity(st.session_state['username'], "ADD_SALE", f"Sold {crop_sold} to {buyer_name} for Rs. {total_amount}")
+                    st.success(f"🎉 ബിൽ സേവ് ചെയ്തു! ആകെ: ₹ {total_amount:.2f}")
 
     # 15. Machinery & Fuel
     elif menu == "മെഷിനറി & ഫ്യുവൽ" and st.session_state["role"] == "Admin":
@@ -439,13 +423,9 @@ else:
             service_note = st.text_area("വിശദാംശങ്ങൾ")
             date = st.date_input("തീയതി", datetime.now())
             if st.form_submit_button("സേവ് ചെയ്യുക") and mach_name:
-                ws = db.worksheet("machinery")
-                ws.append_row([mach_name, fuel_cost, service_note, str(date)])
-                
-                get_data.clear() # Cache clear
-                
-                log_activity(st.session_state['username'], "ADD_MACHINERY", f"Added machinery log for {mach_name}")
-                st.success("സേവ് ചെയ്തു!")
+                if write_data("machinery", [mach_name, fuel_cost, service_note, str(date)]):
+                    log_activity(st.session_state['username'], "ADD_MACHINERY", f"Added machinery log for {mach_name}")
+                    st.success("സേവ് ചെയ്തു!")
 
     # 16. Expense Records
     elif menu == "ചെലവ് കണക്കുകൾ" and st.session_state["role"] == "Admin":
@@ -456,13 +436,9 @@ else:
             description = st.text_area("വിശദാംശങ്ങൾ")
             date = st.date_input("തീയതി", datetime.now())
             if st.form_submit_button("ചെലവ് സേവ് ചെയ്യുക") and amount > 0:
-                ws = db.worksheet("expenses")
-                ws.append_row([category, amount, description, str(date)])
-                
-                get_data.clear() # Cache clear
-                
-                log_activity(st.session_state['username'], "ADD_EXPENSE", f"Added expense {category}: Rs. {amount}")
-                st.success("ചെലവ് സേവ് ചെയ്തു!")
+                if write_data("expenses", [category, amount, description, str(date)]):
+                    log_activity(st.session_state['username'], "ADD_EXPENSE", f"Added expense {category}: Rs. {amount}")
+                    st.success("ചെലവ് സേവ് ചെയ്തു!")
 
     # 17. Profit & Loss Statement
     elif menu == "ലാഭ-നഷ്ടക്കണക്ക് (P&L)" and st.session_state["role"] == "Admin":
