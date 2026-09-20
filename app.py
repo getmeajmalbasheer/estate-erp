@@ -5,7 +5,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 import requests
 import urllib.parse
-from PIL import Image
 
 # 1. Page Configuration
 st.set_page_config(
@@ -49,7 +48,9 @@ def get_data(worksheet_name):
     try:
         ws = db.worksheet(worksheet_name)
         data = ws.get_all_records()
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+        df.columns = df.columns.str.strip()
+        return df
     except Exception as e:
         print(f"Sheet read error [{worksheet_name}]: {e}")
         return pd.DataFrame()
@@ -62,7 +63,7 @@ def write_data(worksheet_name, row_data):
     try:
         ws = db.worksheet(worksheet_name)
         ws.append_row(row_data)
-        get_data.clear()  # Invalidate read cache
+        st.cache_data.clear()  # Invalidate read cache
         return True
     except Exception as e:
         st.error(f"Failed to save record to Google Sheets: {e}")
@@ -132,7 +133,7 @@ if not st.session_state["logged_in"]:
             w_sub = st.form_submit_button("പാസ്ബുക്ക് തുറക്കുക")
             if w_sub and worker_id:
                 st.session_state["logged_in"] = True
-                st.session_state["username"] = worker_id
+                st.session_state["username"] = worker_id.strip()
                 st.session_state["role"] = "Worker"
                 log_activity(worker_id, "WORKER_LOGIN", "Viewed digital passbook")
                 st.rerun()
@@ -159,15 +160,21 @@ else:
         workers_df = get_data("workers")
         adv_df = get_data("advances")
         
-        if not workers_df.empty and 'name' in workers_df.columns:
-            my_work = workers_df[workers_df['name'].astype(str).str.lower() == st.session_state['username'].lower()]
-            st.write("### ഹാജർ വിവരങ്ങൾ")
-            st.dataframe(my_work, use_container_width=True)
+        target_name = st.session_state['username'].strip().lower()
+
+        if not workers_df.empty:
+            name_col = [c for c in workers_df.columns if c.lower() in ['name', 'worker_name', 'പേര്']]
+            if name_col:
+                my_work = workers_df[workers_df[name_col[0]].astype(str).str.strip().str.lower() == target_name]
+                st.write("### ഹാജർ വിവരങ്ങൾ")
+                st.dataframe(my_work, use_container_width=True)
             
-        if not adv_df.empty and 'name' in adv_df.columns:
-            my_adv = adv_df[adv_df['name'].astype(str).str.lower() == st.session_state['username'].lower()]
-            st.write("### അഡ്വാൻസ് വിവരങ്ങൾ")
-            st.dataframe(my_adv, use_container_width=True)
+        if not adv_df.empty:
+            adv_name_col = [c for c in adv_df.columns if c.lower() in ['name', 'worker_name', 'പേര്']]
+            if adv_name_col:
+                my_adv = adv_df[adv_df[adv_name_col[0]].astype(str).str.strip().str.lower() == target_name]
+                st.write("### അഡ്വാൻസ് വിവരങ്ങൾ")
+                st.dataframe(my_adv, use_container_width=True)
             
         st.stop()
 
@@ -217,9 +224,9 @@ else:
         sales_df = get_data("sales")
         
         total_workers = len(workers_df) if not workers_df.empty else 0
-        total_yield = pd.to_numeric(yields_df['quantity'], errors='coerce').sum() if not yields_df.empty and 'quantity' in yields_df.columns else 0.0
-        total_expense = pd.to_numeric(expenses_df['amount'], errors='coerce').sum() if not expenses_df.empty and 'amount' in expenses_df.columns else 0.0
-        total_revenue = pd.to_numeric(sales_df['total_amount'], errors='coerce').sum() if not sales_df.empty and 'total_amount' in sales_df.columns else 0.0
+        total_yield = pd.to_numeric(yields_df['quantity'], errors='coerce').fillna(0).sum() if not yields_df.empty and 'quantity' in yields_df.columns else 0.0
+        total_expense = pd.to_numeric(expenses_df['amount'], errors='coerce').fillna(0).sum() if not expenses_df.empty and 'amount' in expenses_df.columns else 0.0
+        total_revenue = pd.to_numeric(sales_df['total_amount'], errors='coerce').fillna(0).sum() if not sales_df.empty and 'total_amount' in sales_df.columns else 0.0
 
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("തൊഴിലാളികൾ", f"{total_workers} പേർ")
@@ -253,8 +260,8 @@ else:
                 date = st.date_input("തീയതി", datetime.now())
                 
                 submitted = st.form_submit_button("ഹാജർ സേവ് ചെയ്യുക")
-                if submitted and worker_name:
-                    if write_data("workers", [worker_name, block_name, work_type, wage, "GPS Verified", str(date)]):
+                if submitted and worker_name.strip():
+                    if write_data("workers", [worker_name.strip(), block_name, work_type, wage, "GPS Verified", str(date)]):
                         log_activity(st.session_state['username'], "ADD_ATTENDANCE", f"Added attendance for {worker_name}")
                         st.success("ഹാജർ വിജയകരമായി സേവ് ചെയ്തു!")
                 
@@ -265,8 +272,8 @@ else:
                 adv_date = st.date_input("തീയതി", datetime.now())
                 
                 adv_sub = st.form_submit_button("അഡ്വാൻസ് സേവ് ചെയ്യുക")
-                if adv_sub and adv_worker:
-                    if write_data("advances", [adv_worker, adv_amount, str(adv_date)]):
+                if adv_sub and adv_worker.strip():
+                    if write_data("advances", [adv_worker.strip(), adv_amount, str(adv_date)]):
                         log_activity(st.session_state['username'], "ADD_ADVANCE", f"Given advance to {adv_worker}")
                         st.success("അഡ്വാൻസ് കണക്ക് സേവ് ചെയ്തു!")
 
@@ -317,8 +324,8 @@ else:
             shipping_cost = st.number_input("ഷിപ്പിംഗ് ചെലവ് (₹)", min_value=0.0, value=5000.0)
             date = st.date_input("തീയതി", datetime.now())
             
-            if st.form_submit_button("എക്സ്പോർട്ട് റെക്കോർഡ് സേവ് ചെയ്യുക") and buyer_country:
-                if write_data("exports", [buyer_country, export_crop, export_qty, shipping_cost, str(date)]):
+            if st.form_submit_button("എക്സ്പോർട്ട് റെക്കോർഡ് സേവ് ചെയ്യുക") and buyer_country.strip():
+                if write_data("exports", [buyer_country.strip(), export_crop, export_qty, shipping_cost, str(date)]):
                     log_activity(st.session_state['username'], "ADD_EXPORT", f"Added export record for {buyer_country}")
                     st.success("എക്സ്പോർട്ട് വിവരങ്ങൾ സേവ് ചെയ്തു!")
 
@@ -389,8 +396,8 @@ else:
             category = st.selectbox("വിഭാഗം", ["വളങ്ങൾ", "കീടനാശിനികൾ", "ഉപകരണങ്ങൾ"])
             quantity = st.number_input("അളവ്", min_value=0.0, value=10.0)
             date = st.date_input("തീയതി", datetime.now())
-            if st.form_submit_button("സ്റ്റോക്ക് സേവ് ചെയ്യുക") and item_name:
-                if write_data("inventory", [item_name, category, quantity, str(date)]):
+            if st.form_submit_button("സ്റ്റോക്ക് സേവ് ചെയ്യുക") and item_name.strip():
+                if write_data("inventory", [item_name.strip(), category, quantity, str(date)]):
                     log_activity(st.session_state['username'], "ADD_INVENTORY", f"Added inventory item {item_name}")
                     st.success("ഇൻവെന്ററി അപ്ഡേറ്റ് ചെയ്തു!")
 
@@ -409,8 +416,8 @@ else:
             subtotal = quantity_sold * price_per_kg
             total_amount = subtotal + (subtotal * (gst_percent / 100))
             
-            if st.form_submit_button("ബിൽ സേവ് ചെയ്യുക") and buyer_name:
-                if write_data("sales", [buyer_name, phone_no, crop_sold, quantity_sold, price_per_kg, gst_percent, total_amount, str(date)]):
+            if st.form_submit_button("ബിൽ സേവ് ചെയ്യുക") and buyer_name.strip():
+                if write_data("sales", [buyer_name.strip(), phone_no, crop_sold, quantity_sold, price_per_kg, gst_percent, total_amount, str(date)]):
                     log_activity(st.session_state['username'], "ADD_SALE", f"Sold {crop_sold} to {buyer_name} for Rs. {total_amount}")
                     st.success(f"🎉 ബിൽ സേവ് ചെയ്തു! ആകെ: ₹ {total_amount:.2f}")
 
@@ -422,8 +429,8 @@ else:
             fuel_cost = st.number_input("ചെലവ് (₹)", min_value=0.0, value=500.0)
             service_note = st.text_area("വിശദാംശങ്ങൾ")
             date = st.date_input("തീയതി", datetime.now())
-            if st.form_submit_button("സേവ് ചെയ്യുക") and mach_name:
-                if write_data("machinery", [mach_name, fuel_cost, service_note, str(date)]):
+            if st.form_submit_button("സേവ് ചെയ്യുക") and mach_name.strip():
+                if write_data("machinery", [mach_name.strip(), fuel_cost, service_note, str(date)]):
                     log_activity(st.session_state['username'], "ADD_MACHINERY", f"Added machinery log for {mach_name}")
                     st.success("സേവ് ചെയ്തു!")
 
@@ -446,8 +453,8 @@ else:
         sales_df = get_data("sales")
         expenses_df = get_data("expenses")
         
-        total_rev = pd.to_numeric(sales_df['total_amount'], errors='coerce').sum() if not sales_df.empty and 'total_amount' in sales_df.columns else 0.0
-        total_exp = pd.to_numeric(expenses_df['amount'], errors='coerce').sum() if not expenses_df.empty and 'amount' in expenses_df.columns else 0.0
+        total_rev = pd.to_numeric(sales_df['total_amount'], errors='coerce').fillna(0).sum() if not sales_df.empty and 'total_amount' in sales_df.columns else 0.0
+        total_exp = pd.to_numeric(expenses_df['amount'], errors='coerce').fillna(0).sum() if not expenses_df.empty and 'amount' in expenses_df.columns else 0.0
         net_profit = total_rev - total_exp
         
         col1, col2, col3 = st.columns(3)
