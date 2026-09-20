@@ -63,7 +63,7 @@ def write_data(worksheet_name, row_data):
     try:
         ws = db.worksheet(worksheet_name)
         ws.append_row(row_data)
-        st.cache_data.clear()  # Invalidate read cache
+        get_data.clear()  # Invalidate data cache specifically
         return True
     except Exception as e:
         st.error(f"Failed to save record to Google Sheets: {e}")
@@ -110,13 +110,19 @@ if not st.session_state["logged_in"]:
             submit = st.form_submit_button("ലോഗിൻ ചെയ്യുക")
             
             if submit:
-                if username == "admin" and password == "admin123":
+                # Load credentials securely from secrets with fallbacks
+                admin_user = st.secrets.get("credentials", {}).get("admin_user", "admin")
+                admin_pass = st.secrets.get("credentials", {}).get("admin_password", "admin123")
+                sup_user = st.secrets.get("credentials", {}).get("supervisor_user", "supervisor")
+                sup_pass = st.secrets.get("credentials", {}).get("supervisor_password", "sup123")
+
+                if username == admin_user and password == admin_pass:
                     st.session_state["logged_in"] = True
                     st.session_state["username"] = "തോട്ടം ഉടമ (Admin)"
                     st.session_state["role"] = "Admin"
                     log_activity("Admin", "LOGIN", "Successfully logged into system")
                     st.rerun()
-                elif username == "supervisor" and password == "sup123":
+                elif username == sup_user and password == sup_pass:
                     st.session_state["logged_in"] = True
                     st.session_state["username"] = "സൂപ്പർവൈസർ (Supervisor)"
                     st.session_state["role"] = "Supervisor"
@@ -163,14 +169,14 @@ else:
         target_name = st.session_state['username'].strip().lower()
 
         if not workers_df.empty:
-            name_col = [c for c in workers_df.columns if c.lower() in ['name', 'worker_name', 'പേര്']]
+            name_col = [c for c in workers_df.columns if c.lower() in ['name', 'worker_name', 'പേര്', 'തൊഴിലാളിയുടെ പേര്']]
             if name_col:
                 my_work = workers_df[workers_df[name_col[0]].astype(str).str.strip().str.lower() == target_name]
                 st.write("### ഹാജർ വിവരങ്ങൾ")
                 st.dataframe(my_work, use_container_width=True)
             
         if not adv_df.empty:
-            adv_name_col = [c for c in adv_df.columns if c.lower() in ['name', 'worker_name', 'പേര്']]
+            adv_name_col = [c for c in adv_df.columns if c.lower() in ['name', 'worker_name', 'പേര്', 'തൊഴിലാളിയുടെ പേര്']]
             if adv_name_col:
                 my_adv = adv_df[adv_df[adv_name_col[0]].astype(str).str.strip().str.lower() == target_name]
                 st.write("### അഡ്വാൻസ് വിവരങ്ങൾ")
