@@ -69,6 +69,8 @@ def write_data(worksheet_name, row_data):
         st.error(f"Failed to save record to Google Sheets: {e}")
         return False
 
+# ദിവസേന ലൈവ് അപ്‌ഡേറ്റ് ലഭിക്കാൻ TTL = 3600 സജ്ജീകരിച്ചു (ഓരോ 1 മണിക്കൂറിലും ഓട്ടോമാറ്റിക്കായി അപ്ഡേറ്റ് ആകും)
+@st.cache_data(ttl=3600)
 def get_weather():
     """Fetch live weather data from Open-Meteo API."""
     try:
@@ -110,7 +112,6 @@ if not st.session_state["logged_in"]:
             submit = st.form_submit_button("ലോഗിൻ ചെയ്യുക")
             
             if submit:
-                # Load credentials securely from secrets with fallbacks
                 admin_user = st.secrets.get("credentials", {}).get("admin_user", "admin")
                 admin_pass = st.secrets.get("credentials", {}).get("admin_password", "admin123")
                 sup_user = st.secrets.get("credentials", {}).get("supervisor_user", "supervisor")
@@ -205,16 +206,27 @@ else:
         
         col_w1, col_w2 = st.columns(2)
         with col_w1:
-            st.markdown("### 🌤️ തോട്ടം കാലാവസ്ഥ")
+            st.markdown("### 🌤️ തോട്ടം കാലാവസ്ഥ (Daily Updates)")
             temp, humidity, rain = get_weather()
+            
             w1, w2, w3 = st.columns(3)
             w1.metric("🌡️ താപനില", f"{temp} °C")
             w2.metric("💧 ഈർപ്പം", f"{humidity} %")
             w3.metric("🌧️ മഴ", f"{rain} mm")
+            
             if humidity > 85 and rain > 2:
                 st.warning("⚠️ ജാഗ്രത: ഏലത്തിൽ കാപ്സ്യൂൾ റോട്ട് രോഗം വരാൻ സാധ്യതയുള്ള കാലാവസ്ഥ!")
             else:
                 st.success("✅ കാലാവസ്ഥ അനുകൂലം.")
+
+            today_date = datetime.now().strftime("%Y-%m-%d")
+            st.caption(f"📅 അവസാനമായി അപ്ഡേറ്റ് ചെയ്ത തീയതി: **{today_date}**")
+
+            # ദിവസേനയുള്ള കാലാവസ്ഥാ ഡാറ്റ ഗൂഗിൾ ഷീറ്റിൽ സേവ് ചെയ്യാനുള്ള ബട്ടൺ
+            if st.button("💾 ഇന്നത്തെ കാലാവസ്ഥ റെക്കോർഡിലേക്ക് സേവ് ചെയ്യുക"):
+                if write_data("weather_logs", [today_date, temp, humidity, rain]):
+                    log_activity(st.session_state['username'], "LOG_WEATHER", f"Saved daily weather: {temp}°C, {humidity}%, {rain}mm")
+                    st.success("ഇന്നത്തെ കാലാവസ്ഥാ വിവരങ്ങൾ ഗൂഗിൾ ഷീറ്റിൽ സേവ് ചെയ്തു!")
 
         with col_w2:
             st.markdown("### 📈 സ്പൈസസ് ബോർഡ് ലൈവ് വിപണി വില")
@@ -471,9 +483,9 @@ else:
     # 18. Comprehensive Data Reports
     elif menu == "റിപ്പോർട്ടുകൾ" and st.session_state["role"] == "Admin":
         st.subheader("📈 സമഗ്രമായ ഡാറ്റാ റിപ്പോർട്ടുകൾ")
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
             "ആക്ടിവിറ്റി ലോഗ്", "തൊഴിലാളികൾ", "മണ്ണുപരിശോധന", "എക്സ്പോർട്ട്", 
-            "വിളവെടുപ്പ്", "ഇൻവെന്ററി", "വിൽപ്പന", "മെഷിനറി", "ചെലവുകൾ"
+            "വിളവെടുപ്പ്", "ഇൻവെന്ററി", "വിൽപ്പന", "മെഷിനറി", "ചെലവുകൾ", "കാലാവസ്ഥ ലോഗ്"
         ])
         with tab1:
             st.dataframe(get_data("activity_logs"), use_container_width=True)
@@ -493,3 +505,5 @@ else:
             st.dataframe(get_data("machinery"), use_container_width=True)
         with tab9:
             st.dataframe(get_data("expenses"), use_container_width=True)
+        with tab10:
+            st.dataframe(get_data("weather_logs"), use_container_width=True)
