@@ -69,7 +69,7 @@ def write_data(worksheet_name, row_data):
         st.error(f"Failed to save record to Google Sheets: {e}")
         return False
 
-# ദിവസേന ലൈവ് അപ്‌ഡേറ്റ് ലഭിക്കാൻ TTL = 3600 സജ്ജീകരിച്ചു (ഓരോ 1 മണിക്കൂറിലും ഓട്ടോമാറ്റിക്കായി അപ്ഡേറ്റ് ആകും)
+# ദിവസേന ലൈവ് കാലാവസ്ഥ അപ്‌ഡേറ്റ് ലഭിക്കാൻ TTL = 3600 സജ്ജീകരിച്ചു (ഓരോ 1 മണിക്കൂറിലും ഓട്ടോമാറ്റിക്കായി ഫെച്ച് ചെയ്യും)
 @st.cache_data(ttl=3600)
 def get_weather():
     """Fetch live weather data from Open-Meteo API."""
@@ -83,14 +83,27 @@ def get_weather():
     except Exception:
         return 24.5, 82.0, 0.0
 
+# ലൈവ് വിപണി വില ലഭിക്കുന്നതിനുള്ള ഫങ്ഷൻ
+@st.cache_data(ttl=3600)
 def get_market_prices():
-    """Return live market prices."""
-    return {
-        "ഏലം (Cardamom - 7mm/8mm)": "₹ 1,650 / kg",
-        "കുരുമുളക് (Black Pepper)": "₹ 620 / kg",
-        "ജാതിക്ക (Nutmeg)": "₹ 240 / kg",
-        "ജാതിപത്രി (Mace)": "₹ 1,150 / kg"
+    """Fetch live market prices from database or return default values."""
+    try:
+        prices_df = get_data("market_prices")
+        if not prices_df.empty and 'crop' in prices_df.columns and 'price' in prices_df.columns:
+            # ഷീറ്റിലെ ഏറ്റവും പുതിയ തീയതിയിലുള്ള വിലകൾ എടുക്കുന്നു
+            price_dict = dict(zip(prices_df['crop'], prices_df['price']))
+            last_updated = prices_df['updated_at'].iloc[-1] if 'updated_at' in prices_df.columns else datetime.now().strftime("%Y-%m-%d")
+            return price_dict, last_updated
+    except Exception as e:
+        print(f"Market price read error: {e}")
+        
+    default_prices = {
+        "ഏലം (Cardamom - 7mm/8mm)": "₹ 1,680 / kg",
+        "കുരുമുളക് (Black Pepper)": "₹ 635 / kg",
+        "ജാതിക്ക (Nutmeg)": "₹ 245 / kg",
+        "ജാതിപത്രി (Mace)": "₹ 1,180 / kg"
     }
+    return default_prices, datetime.now().strftime("%Y-%m-%d")
 
 # 4. Session State Initialization
 if "logged_in" not in st.session_state:
@@ -191,7 +204,7 @@ else:
             "ഡാഷ്‌ബോർഡ്", "ഓഡിറ്റ് ട്രെയ്ൽ (Activity Log)", "തൊഴിലാളി & UPI പേയ്‌മെന്റ്", 
             "ലേഖന വിശകലനം (Productivity)", "മണ്ണുപരിശോധന (Soil Test Log)", "എക്സ്പോർട്ട് & ഷിപ്പിംഗ്", 
             "🤖 AI തോട്ടം ചാറ്റ്‌ബോട്ട്", "🔮 AI വിളവെടുപ്പ് പ്രവചനം", "💡 AI ചെലവ് ഒപ്റ്റിമൈസർ", 
-            "AI രോഗ നിർണ്ണയം (AI Diagnosis)", "വോയ്സ് എൻട്രി (Voice Command)", 
+            "AI രോഗ നിർണ്ണയം (AI Diagnosis)", "VOICE കമാൻഡ് എൻട്രി", 
             "വിളവെടുപ്പ് & ഗ്രേഡിംഗ്", "സ്റ്റോക്ക് & ഇൻവെന്ററി", "വിൽപ്പനയും ബില്ലിംഗും", 
             "മെഷിനറി & ഫ്യുവൽ", "ചെലവ് കണക്കുകൾ", "ലാഭ-നഷ്ടക്കണക്ക് (P&L)", "റിപ്പോർട്ടുകൾ"
         ]
@@ -205,6 +218,8 @@ else:
         st.subheader("📊 സ്മാർട്ട് ഡാഷ്‌ബോർഡും ലൈവ് വിപണി വിലയും")
         
         col_w1, col_w2 = st.columns(2)
+        
+        # തോട്ടം കാലാവസ്ഥ വിഭഗം (Daily Weather Update)
         with col_w1:
             st.markdown("### 🌤️ തോട്ടം കാലാവസ്ഥ (Daily Updates)")
             temp, humidity, rain = get_weather()
@@ -222,17 +237,40 @@ else:
             today_date = datetime.now().strftime("%Y-%m-%d")
             st.caption(f"📅 അവസാനമായി അപ്ഡേറ്റ് ചെയ്ത തീയതി: **{today_date}**")
 
-            # ദിവസേനയുള്ള കാലാവസ്ഥാ ഡാറ്റ ഗൂഗിൾ ഷീറ്റിൽ സേവ് ചെയ്യാനുള്ള ബട്ടൺ
             if st.button("💾 ഇന്നത്തെ കാലാവസ്ഥ റെക്കോർഡിലേക്ക് സേവ് ചെയ്യുക"):
                 if write_data("weather_logs", [today_date, temp, humidity, rain]):
                     log_activity(st.session_state['username'], "LOG_WEATHER", f"Saved daily weather: {temp}°C, {humidity}%, {rain}mm")
                     st.success("ഇന്നത്തെ കാലാവസ്ഥാ വിവരങ്ങൾ ഗൂഗിൾ ഷീറ്റിൽ സേവ് ചെയ്തു!")
 
+        # സ്പൈസസ് ബോർഡ് ലൈവ് വിപണി വില (Daily Market Price Update)
         with col_w2:
-            st.markdown("### 📈 സ്പൈസസ് ബോർഡ് ലൈവ് വിപണി വില")
-            prices = get_market_prices()
+            st.markdown("### 📈 സ്പൈസസ് ബോർഡ് ലൈവ് വിപണി വില (Daily Updates)")
+            prices, price_updated_date = get_market_prices()
+            
             for crop, price in prices.items():
                 st.info(f"**{crop}**: {price}")
+                
+            st.caption(f"📅 വിപണി വില പുതുക്കിയ തീയതി: **{price_updated_date}**")
+
+            # അഡ്മിന് മാത്രമായി ദിവസേനയുള്ള വിപണി വില എഡിറ്റ് ചെയ്യാനുള്ള സംവിധാനം
+            if st.session_state["role"] == "Admin":
+                with st.expander("📝 ദിവസേനയുള്ള വിപണി വില നേരിട്ട് മാറ്റി അപ്ഡേറ്റ് ചെയ്യുക"):
+                    with st.form("update_prices_form"):
+                        cardamom_p = st.text_input("ഏലം വില (₹/kg)", value=prices.get("ഏലം (Cardamom - 7mm/8mm)", "₹ 1,680 / kg"))
+                        pepper_p = st.text_input("കുരുമുളക് വില (₹/kg)", value=prices.get("കുരുമുളക് (Black Pepper)", "₹ 635 / kg"))
+                        nutmeg_p = st.text_input("ജാതിക്ക വില (₹/kg)", value=prices.get("ജാതിക്ക (Nutmeg)", "₹ 245 / kg"))
+                        mace_p = st.text_input("ജാതിപത്രി വില (₹/kg)", value=prices.get("ജാതിപത്രി (Mace)", "₹ 1,180 / kg"))
+                        
+                        if st.form_submit_button("വിപണി വില അപ്‌ഡേറ്റ് ചെയ്യുക"):
+                            today_str = datetime.now().strftime("%Y-%m-%d")
+                            write_data("market_prices", ["ഏലം (Cardamom - 7mm/8mm)", cardamom_p, today_str])
+                            write_data("market_prices", ["കുരുമുളക് (Black Pepper)", pepper_p, today_str])
+                            write_data("market_prices", ["ജാതിക്ക (Nutmeg)", nutmeg_p, today_str])
+                            write_data("market_prices", ["ജാതിപത്രി (Mace)", mace_p, today_str])
+                            
+                            log_activity(st.session_state['username'], "UPDATE_MARKET_PRICES", "Updated daily market prices")
+                            st.success("വിപണി വില വിജയകരമായി അപ്‌ഡേറ്റ് ചെയ്തു!")
+                            st.rerun()
 
         st.markdown("---")
         
@@ -383,7 +421,7 @@ else:
                 st.success("🔬 **രോഗം കണ്ടെത്തൽ:** കാപ്സ്യൂൾ റോട്ട് (Capsule Rot). കോപ്പർ ഓക്‌സിക്ലോറൈഡ് മരുന്ന് തളിക്കുക.")
 
     # 11. Voice Entry
-    elif menu == "വോയ്സ് എൻട്രി (Voice Command)":
+    elif menu == "VOICE കമാൻഡ് എൻട്രി":
         st.subheader("🎙️ മലയാളം വോയ്സ് കമാൻഡ് എൻട്രി")
         voice_text = st.text_area("സംസാരിച്ചതിന്റെ ടെക്സ്റ്റ് രൂപം")
         if st.button("സേവ് ചെയ്യുക"):
@@ -483,9 +521,9 @@ else:
     # 18. Comprehensive Data Reports
     elif menu == "റിപ്പോർട്ടുകൾ" and st.session_state["role"] == "Admin":
         st.subheader("📈 സമഗ്രമായ ഡാറ്റാ റിപ്പോർട്ടുകൾ")
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
             "ആക്ടിവിറ്റി ലോഗ്", "തൊഴിലാളികൾ", "മണ്ണുപരിശോധന", "എക്സ്പോർട്ട്", 
-            "വിളവെടുപ്പ്", "ഇൻവെന്ററി", "വിൽപ്പന", "മെഷിനറി", "ചെലവുകൾ", "കാലാവസ്ഥ ലോഗ്"
+            "വിളവെടുപ്പ്", "ഇൻവെന്ററി", "വിൽപ്പന", "മെഷിനറി", "ചെലവുകൾ", "കാലാവസ്ഥ ലോഗ്", "വിപണി വിലകൾ"
         ])
         with tab1:
             st.dataframe(get_data("activity_logs"), use_container_width=True)
@@ -507,3 +545,5 @@ else:
             st.dataframe(get_data("expenses"), use_container_width=True)
         with tab10:
             st.dataframe(get_data("weather_logs"), use_container_width=True)
+        with tab11:
+            st.dataframe(get_data("market_prices"), use_container_width=True)
